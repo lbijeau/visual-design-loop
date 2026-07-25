@@ -1,0 +1,3 @@
+[extend]
+# Extend (not replace) gitleaks' built-in default ruleset.
+useDefault = true

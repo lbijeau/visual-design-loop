@@ -1,0 +1,1373 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>StyleSentry — Provider Configuration</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      /* Accessibility: prefers-reduced-motion */
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          animation-duration: 0.01ms !important;
+          transition-duration: 0.01ms !important;
+        }
+      }
+
+      /* Focus rings — ≥3:1 contrast */
+      :focus-visible {
+        outline: 3px solid #ff6b00;
+        outline-offset: 2px;
+      }
+
+      /* Spinner */
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      .spinner {
+        width: 18px;
+        height: 18px;
+        border: 2px solid #555;
+        border-top-color: #00f0ff;
+        border-radius: 50%;
+        animation: spin 0.6s linear infinite;
+        display: inline-block;
+      }
+
+      /* Toggle switch */
+      .toggle-switch {
+        position: relative;
+        width: 44px;
+        height: 24px;
+        flex-shrink: 0;
+      }
+      .toggle-switch input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+        position: absolute;
+      }
+      .toggle-slider {
+        position: absolute;
+        cursor: pointer;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: #555;
+        border-radius: 12px;
+        transition: background-color 0.2s;
+      }
+      .toggle-slider::before {
+        content: "";
+        position: absolute;
+        height: 18px;
+        width: 18px;
+        left: 3px;
+        bottom: 3px;
+        background-color: white;
+        border-radius: 50%;
+        transition: transform 0.2s;
+      }
+      .toggle-switch input:checked + .toggle-slider {
+        background-color: #00f0ff;
+      }
+      .toggle-switch input:checked + .toggle-slider::before {
+        transform: translateX(20px);
+      }
+
+      /* Step transitions */
+      .step-panel {
+        display: none;
+      }
+      .step-panel.active {
+        display: block;
+      }
+
+      /* Neon buttons: dark text */
+      .btn-neon {
+        color: #0a0a0f;
+        font-weight: 700;
+        padding: 0.5rem 1.25rem;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: opacity 0.15s;
+      }
+      .btn-neon:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+      .btn-neon:hover:not(:disabled) {
+        opacity: 0.85;
+      }
+      .btn-primary {
+        background-color: #00f0ff;
+      }
+      .btn-success {
+        background-color: #00ff88;
+      }
+      .btn-danger {
+        background-color: #ff4466;
+        color: white;
+      }
+
+      /* Summary table */
+      .summary-table th {
+        padding: 0.5rem 0.75rem;
+        text-align: left;
+      }
+      .summary-table td {
+        padding: 0.5rem 0.75rem;
+      }
+
+      /* Modal overlay */
+      .modal-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.6);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 100;
+      }
+      .modal-overlay.hidden {
+        display: none;
+      }
+      .modal-box {
+        background: #1a1a2e;
+        border: 1px solid #333;
+        border-radius: 12px;
+        padding: 1.5rem;
+        max-width: 420px;
+        width: 90%;
+        color: #e0e0e0;
+      }
+
+      /* Full-page loading */
+      .loading-overlay {
+        position: fixed;
+        inset: 0;
+        background: #0a0a0f;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        z-index: 200;
+        color: #ccc;
+      }
+      .loading-overlay.hidden {
+        display: none;
+      }
+
+      /* Error/retry state */
+      .error-state {
+        position: fixed;
+        inset: 0;
+        background: #0a0a0f;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        z-index: 200;
+        color: #ff4466;
+      }
+      .error-state.hidden {
+        display: none;
+      }
+
+      /* Collapsible */
+      .collapsible-content {
+        max-height: 0;
+        overflow: hidden;
+        transition: max-height 0.3s ease;
+      }
+      .collapsible-content.open {
+        max-height: 2000px;
+      }
+
+      /* Toast */
+      .toast {
+        position: fixed;
+        bottom: 1.5rem;
+        right: 1.5rem;
+        background: #1a1a2e;
+        border: 1px solid #00ff88;
+        color: #e0e0e0;
+        padding: 0.75rem 1.25rem;
+        border-radius: 8px;
+        z-index: 300;
+        transition: opacity 0.3s;
+      }
+      .toast.hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      /* Status dot text */
+      .status-text {
+        font-size: 0.75rem;
+        margin-left: 0.25rem;
+      }
+
+      /* Card body hidden when disabled */
+      .card-body {
+        transition: opacity 0.2s;
+      }
+      .card-body.collapsed {
+        opacity: 0.4;
+        pointer-events: none;
+        height: 0;
+        overflow: hidden;
+        padding: 0 !important;
+        margin: 0 !important;
+      }
+
+      /* Touch targets */
+      .touch-target {
+        min-width: 44px;
+        min-height: 44px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      /* Body contrast */
+      body {
+        color: #e0e0e0;
+        background: #0a0a0f;
+      }
+    </style>
+  </head>
+  <body class="font-sans antialiased">
+    <!-- aria-live regions -->
+    <div id="toast-region" role="status" aria-live="polite" class="toast hidden"></div>
+    <div id="alert-region" role="alert" aria-live="assertive" class="sr-only"></div>
+
+    <!-- Full-page loading -->
+    <div id="loading-overlay" class="loading-overlay">
+      <div class="spinner" style="width: 36px; height: 36px; border-width: 3px"></div>
+      <p class="mt-4">Loading provider settings…</p>
+    </div>
+
+    <!-- Full-page error -->
+    <div id="error-overlay" class="error-state hidden">
+      <p class="text-xl mb-4">⚠️ Couldn't load settings</p>
+      <button id="retry-btn" class="btn-neon btn-primary touch-target" onclick="loadProviders()">Retry</button>
+    </div>
+
+    <!-- Main container -->
+    <div id="main-container" class="hidden" style="max-width: 720px; margin: 0 auto; padding: 2rem 1rem">
+      <!-- Header -->
+      <header class="flex items-center justify-between mb-6">
+        <h1 class="text-xl font-bold">StyleSentry — Provider Configuration</h1>
+        <div id="close-btn" class="hidden">
+          <button
+            class="touch-target text-gray-400 hover:text-white text-2xl leading-none"
+            aria-label="Close without saving"
+            onclick="handleClose()"
+          >
+            ✕
+          </button>
+        </div>
+      </header>
+
+      <!-- Reset link -->
+      <div class="mb-4">
+        <button
+          id="reset-btn"
+          class="text-sm text-gray-400 hover:text-gray-200 underline cursor-pointer bg-transparent border-none"
+          onclick="handleReset()"
+        >
+          Reset to Ollama only
+        </button>
+      </div>
+
+      <!-- Progress -->
+      <nav aria-label="Wizard progress" class="mb-6">
+        <p id="step-label" class="text-sm text-gray-400 mb-2">Step 1 of 3: Providers</p>
+        <ol class="flex items-center gap-3 list-none p-0 m-0" aria-label="Steps">
+          <li id="step-dot-1" class="flex items-center gap-1.5 text-sm font-medium" aria-current="step">
+            <span class="w-3 h-3 rounded-full bg-cyan-400 inline-block" aria-hidden="true"></span>
+            <span>1. Providers</span>
+          </li>
+          <li class="text-gray-600">›</li>
+          <li id="step-dot-2" class="flex items-center gap-1.5 text-sm text-gray-500">
+            <span class="w-3 h-3 rounded-full bg-gray-600 inline-block" aria-hidden="true"></span>
+            <span>2. Roles</span>
+          </li>
+          <li class="text-gray-600">›</li>
+          <li id="step-dot-3" class="flex items-center gap-1.5 text-sm text-gray-500">
+            <span class="w-3 h-3 rounded-full bg-gray-600 inline-block" aria-hidden="true"></span>
+            <span>3. Summary</span>
+          </li>
+        </ol>
+      </nav>
+
+      <!-- ===== STEP 1: Providers ===== -->
+      <section id="step-1" class="step-panel active" aria-labelledby="step1-title">
+        <h2 id="step1-title" tabindex="-1" class="text-lg font-semibold mb-4">AI Providers</h2>
+
+        <!-- Auto-configure -->
+        <div class="border border-gray-600 rounded-lg p-4 mb-6 bg-gray-900/50">
+          <p class="font-semibold mb-3"><span aria-hidden="true">⚡</span> Quick Start — Auto-configure</p>
+          <div class="space-y-2">
+            <label class="flex items-start gap-2 cursor-pointer">
+              <input type="radio" name="auto-configure" value="roles" class="mt-1" checked />
+              <div>
+                <span class="font-medium">Roles only</span>
+                <span class="text-sm text-gray-400 block"
+                  >Keep my providers and keys, just auto-assign Brain and Eyes</span
+                >
+              </div>
+            </label>
+            <label class="flex items-start gap-2 cursor-pointer">
+              <input type="radio" name="auto-configure" value="everything" />
+              <div>
+                <span class="font-medium">Everything</span>
+                <span class="text-sm text-gray-400 block">Enable recommended providers, auto-assign roles</span>
+              </div>
+            </label>
+          </div>
+          <button class="btn-neon btn-primary mt-3 touch-target" onclick="autoConfigure()">Apply</button>
+        </div>
+
+        <hr class="border-gray-700 mb-6" />
+
+        <!-- Provider cards -->
+        <div id="provider-cards" class="space-y-4"></div>
+
+        <!-- Add custom provider -->
+        <button
+          id="add-custom-btn"
+          class="mt-4 border border-dashed border-gray-600 rounded-lg p-3 w-full text-gray-400 hover:text-white hover:border-gray-400 cursor-pointer bg-transparent"
+          onclick="addCustomProvider()"
+        >
+          + Add custom provider
+        </button>
+
+        <!-- Navigation -->
+        <div class="flex justify-end mt-6">
+          <button
+            id="next-1"
+            class="btn-neon btn-primary touch-target"
+            onclick="goToStep(2)"
+            disabled
+            title="Enable at least one provider to continue"
+          >
+            Next: Role Assignment →
+          </button>
+        </div>
+      </section>
+
+      <!-- ===== STEP 2: Roles ===== -->
+      <section id="step-2" class="step-panel" aria-labelledby="step2-title">
+        <h2 id="step2-title" tabindex="-1" class="text-lg font-semibold mb-4">Role Assignment</h2>
+
+        <!-- Empty state -->
+        <div id="roles-empty" class="hidden text-center py-8 text-gray-400">
+          <p class="mb-3">No providers available.</p>
+          <button class="btn-neon btn-primary touch-target" onclick="goToStep(1)">← Back to Step 1</button>
+        </div>
+
+        <!-- Roles config -->
+        <div id="roles-content" class="space-y-6">
+          <!-- Brain -->
+          <div class="border border-gray-600 rounded-lg p-4">
+            <h3 class="font-semibold mb-3">
+              <span aria-hidden="true">🧠</span> Brain
+              <span class="text-sm text-gray-400 font-normal">(Code Generation)</span>
+            </h3>
+            <div class="mb-2">
+              <label for="brain-primary" class="text-sm text-gray-400">Primary Provider</label>
+              <select
+                id="brain-primary"
+                class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white mt-1"
+                onchange="validateStep2()"
+              ></select>
+            </div>
+            <div>
+              <button
+                class="text-sm text-gray-400 hover:text-white cursor-pointer bg-transparent border-none underline"
+                onclick="toggleAdvanced('brain')"
+              >
+                ▸ Advanced: Fallback chain
+              </button>
+              <div id="brain-fallback" class="collapsible-content mt-2">
+                <div id="brain-fallback-list" class="space-y-2"></div>
+                <button
+                  class="text-sm text-cyan-400 hover:text-cyan-300 cursor-pointer bg-transparent border-none mt-2"
+                  onclick="addFallback('brain')"
+                >
+                  ＋ Add fallback
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Eyes -->
+          <div class="border border-gray-600 rounded-lg p-4">
+            <h3 class="font-semibold mb-3">
+              <span aria-hidden="true">👁️</span> Eyes
+              <span class="text-sm text-gray-400 font-normal">(Visual Audit)</span>
+            </h3>
+            <div class="mb-2">
+              <label for="eyes-primary" class="text-sm text-gray-400">Primary Provider</label>
+              <select
+                id="eyes-primary"
+                class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white mt-1"
+                onchange="validateStep2()"
+              ></select>
+            </div>
+            <div>
+              <button
+                class="text-sm text-gray-400 hover:text-white cursor-pointer bg-transparent border-none underline"
+                onclick="toggleAdvanced('eyes')"
+              >
+                ▸ Advanced: Fallback chain
+              </button>
+              <div id="eyes-fallback" class="collapsible-content mt-2">
+                <div id="eyes-fallback-list" class="space-y-2"></div>
+                <button
+                  class="text-sm text-cyan-400 hover:text-cyan-300 cursor-pointer bg-transparent border-none mt-2"
+                  onclick="addFallback('eyes')"
+                >
+                  ＋ Add fallback
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Navigation -->
+        <div class="flex justify-between mt-6">
+          <button class="btn-neon touch-target bg-gray-700 text-white" onclick="goToStep(1)">← Back</button>
+          <button id="next-2" class="btn-neon btn-primary touch-target" onclick="goToStep(3)" disabled>
+            Next: Summary →
+          </button>
+        </div>
+      </section>
+
+      <!-- ===== STEP 3: Summary ===== -->
+      <section id="step-3" class="step-panel" aria-labelledby="step3-title">
+        <h2 id="step3-title" tabindex="-1" class="text-lg font-semibold mb-4">Summary</h2>
+
+        <!-- Alert banner -->
+        <div
+          id="alert-banner"
+          class="hidden border border-red-500 bg-red-900/30 text-red-300 rounded-lg p-3 mb-4"
+          role="alert"
+        ></div>
+
+        <!-- Summary table -->
+        <div id="summary-content" class="border border-gray-600 rounded-lg overflow-hidden mb-6">
+          <table class="summary-table w-full">
+            <thead>
+              <tr class="bg-gray-800">
+                <th scope="col">Role</th>
+                <th scope="col">Primary</th>
+                <th scope="col">Fallback</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">🧠 Brain</th>
+                <td id="sum-brain-primary">—</td>
+                <td id="sum-brain-fallback">—</td>
+              </tr>
+              <tr>
+                <th scope="row">👁️ Eyes</th>
+                <td id="sum-eyes-primary">—</td>
+                <td id="sum-eyes-fallback">—</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Providers summary -->
+        <div id="providers-summary" class="space-y-2 mb-6"></div>
+
+        <!-- Navigation -->
+        <div class="flex justify-between mt-6">
+          <button class="btn-neon touch-target bg-gray-700 text-white" onclick="goToStep(2)">← Back</button>
+          <button id="launch-btn" class="btn-neon btn-success touch-target" onclick="handleLaunch()" disabled>
+            Start Design Loop
+          </button>
+        </div>
+      </section>
+    </div>
+
+    <!-- Confirm dialog -->
+    <div
+      id="confirm-modal"
+      class="modal-overlay hidden"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="confirm-title"
+    >
+      <div class="modal-box">
+        <h3 id="confirm-title" class="font-semibold text-lg mb-2">Confirm</h3>
+        <p id="confirm-message" class="text-gray-300 mb-4"></p>
+        <div class="flex justify-end gap-2">
+          <button class="btn-neon touch-target bg-gray-700 text-white" onclick="closeModal('confirm-modal')">
+            Cancel
+          </button>
+          <button id="confirm-action" class="btn-neon btn-success touch-target">Confirm</button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // ===== State =====
+      let config = null;
+      let originalConfig = null;
+      let isSetupMode = false;
+      let currentStep = 1;
+      let stepErrors = { 1: false, 2: false, 3: false };
+      let connectionResults = {};
+
+      // ===== Init =====
+      (function init() {
+        const params = new URLSearchParams(window.location.search);
+        isSetupMode = params.get("mode") === "setup";
+        if (params.get("mode") === "settings") {
+          document.getElementById("close-btn").classList.remove("hidden");
+        }
+        loadProviders();
+      })();
+
+      async function loadProviders() {
+        showLoading(true);
+        showError(false);
+        try {
+          const resp = await fetch("/providers", { signal: AbortSignal.timeout(10000) });
+          if (!resp.ok) throw new Error("Failed to load");
+          config = await resp.json();
+          originalConfig = JSON.parse(JSON.stringify(config));
+          document.getElementById("loading-overlay").classList.add("hidden");
+          document.getElementById("main-container").classList.remove("hidden");
+          document.getElementById("launch-btn").textContent = isSetupMode ? "Start Design Loop" : "Save & Apply";
+          renderStep1();
+        } catch (e) {
+          showLoading(false);
+          showError(true);
+        }
+      }
+
+      function showLoading(show) {
+        document.getElementById("loading-overlay").classList.toggle("hidden", !show);
+      }
+
+      function showError(show) {
+        document.getElementById("error-overlay").classList.toggle("hidden", !show);
+      }
+
+      function showToast(msg) {
+        const el = document.getElementById("toast-region");
+        el.textContent = msg;
+        el.classList.remove("hidden");
+        setTimeout(() => el.classList.add("hidden"), 4000);
+      }
+
+      function showAlert(msg) {
+        const el = document.getElementById("alert-region");
+        el.textContent = msg;
+      }
+
+      // ===== Helpers =====
+      function enabledProviders() {
+        return (config.providers || []).filter((p) => p.enabled);
+      }
+
+      function providerById(id) {
+        return (config.providers || []).find((p) => p.id === id);
+      }
+
+      function maskKey(key) {
+        if (!key) return "";
+        if (key.length <= 12) return "****";
+        return key.slice(0, 4) + "..." + key.slice(-4);
+      }
+
+      // ===== Step Navigation =====
+      function goToStep(step) {
+        // Validate current step before advancing
+        if (step > currentStep) {
+          if (currentStep === 1 && enabledProviders().length === 0) return;
+          if (currentStep === 2) {
+            if (!document.getElementById("brain-primary").value || !document.getElementById("eyes-primary").value)
+              return;
+          }
+        }
+        currentStep = step;
+        // Hide all steps, show current
+        document.querySelectorAll(".step-panel").forEach((el) => el.classList.remove("active"));
+        document.getElementById(`step-${step}`).classList.add("active");
+        // Update progress dots
+        updateProgress();
+        // Focus management
+        const title = document.getElementById(`step${step}-title`);
+        if (title) title.focus();
+        // Render step content
+        if (step === 2) renderStep2();
+        if (step === 3) renderStep3();
+      }
+
+      function updateProgress() {
+        for (let i = 1; i <= 3; i++) {
+          const dot = document.getElementById(`step-dot-${i}`);
+          const circle = dot.querySelector("span:first-child");
+          dot.removeAttribute("aria-current");
+          dot.classList.remove("text-white", "text-cyan-400", "text-red-400");
+          dot.classList.add(i < currentStep ? "text-green-400" : i === currentStep ? "text-cyan-400" : "text-gray-500");
+          circle.className =
+            "w-3 h-3 rounded-full inline-block " +
+            (i < currentStep
+              ? "bg-green-400"
+              : i === currentStep
+                ? stepErrors[i]
+                  ? "bg-red-400 ring-2 ring-cyan-400"
+                  : "bg-cyan-400"
+                : "bg-gray-600");
+          if (i === currentStep) dot.setAttribute("aria-current", "step");
+          // Add text labels
+          const label = i < currentStep ? "✓ Completed" : i === currentStep ? "Current" : "";
+          let textSpan = dot.querySelector(".step-status-text");
+          if (!textSpan) {
+            textSpan = document.createElement("span");
+            textSpan.className = "step-status-text text-xs ml-1";
+            dot.appendChild(textSpan);
+          }
+          textSpan.textContent = label;
+        }
+        const stepNames = ["Providers", "Roles", "Summary"];
+        document.getElementById("step-label").textContent = `Step ${currentStep} of 3: ${stepNames[currentStep - 1]}`;
+      }
+
+      // ===== Step 1: Providers =====
+      function renderStep1() {
+        const container = document.getElementById("provider-cards");
+        container.innerHTML = "";
+        (config.providers || []).forEach((p, idx) => {
+          container.appendChild(createProviderCard(p, idx));
+        });
+        validateStep1();
+      }
+
+      function createProviderCard(p, idx) {
+        const isCustom = p.type === "custom";
+        const builtin = !isCustom;
+        const status = connectionResults[p.id];
+
+        const card = document.createElement("div");
+        card.className = "border border-gray-600 rounded-lg overflow-hidden";
+        card.setAttribute("data-provider-id", p.id);
+
+        // Header with toggle
+        const header = document.createElement("div");
+        header.className = "flex items-center justify-between p-3 bg-gray-800/50";
+
+        const left = document.createElement("div");
+        left.className = "flex items-center gap-2";
+
+        // Toggle
+        const toggleLabel = document.createElement("label");
+        toggleLabel.className = "toggle-switch";
+        toggleLabel.setAttribute("aria-label", `Enable ${p.name}`);
+        const toggle = document.createElement("input");
+        toggle.type = "checkbox";
+        toggle.role = "switch";
+        toggle.setAttribute("aria-checked", p.enabled ? "true" : "false");
+        toggle.checked = p.enabled;
+        toggle.addEventListener("change", () => {
+          p.enabled = toggle.checked;
+          toggle.setAttribute("aria-checked", toggle.checked ? "true" : "false");
+          body.classList.toggle("collapsed", !toggle.checked);
+          // Cross-step consistency: remove from roles if disabled
+          if (!toggle.checked) {
+            removeProviderFromRoles(p.id);
+          }
+          validateStep1();
+        });
+        toggle.addEventListener("keydown", (e) => {
+          if (e.key === " ") {
+            e.preventDefault();
+            toggle.click();
+          }
+        });
+        const slider = document.createElement("span");
+        slider.className = "toggle-slider";
+        toggleLabel.appendChild(toggle);
+        toggleLabel.appendChild(slider);
+
+        // Name + emoji
+        const emojis = { ollama: "🦙", openrouter: "🔀", openai: "🤖", anthropic: "🐙", deepseek: "⚡" };
+        const nameSpan = document.createElement("span");
+        nameSpan.className = "font-medium";
+        nameSpan.innerHTML = `<span aria-hidden="true">${emojis[p.id] || "🔌"}</span> <span>${p.name}</span>`;
+
+        // Status dot
+        const statusSpan = document.createElement("span");
+        statusSpan.className = "ml-2";
+        statusSpan.setAttribute("aria-label", statusLabel(status));
+        if (status && status.ok) {
+          statusSpan.innerHTML = `<span class="w-2 h-2 rounded-full bg-green-400 inline-block" aria-hidden="true"></span><span class="status-text text-green-400" aria-hidden="true">✓ Connected</span>`;
+        } else if (status && !status.ok) {
+          statusSpan.innerHTML = `<span class="w-2 h-2 rounded-full bg-red-400 inline-block" aria-hidden="true"></span><span class="status-text text-red-400" aria-hidden="true">✗ ${status.message || "Failed"}</span>`;
+        } else {
+          statusSpan.innerHTML = `<span class="w-2 h-2 rounded-full bg-gray-500 inline-block" aria-hidden="true"></span><span class="status-text text-gray-500" aria-hidden="true">– Untested</span>`;
+        }
+
+        left.appendChild(toggleLabel);
+        left.appendChild(nameSpan);
+        left.appendChild(statusSpan);
+        header.appendChild(left);
+
+        // Delete button for custom
+        if (isCustom) {
+          const delBtn = document.createElement("button");
+          delBtn.className =
+            "touch-target text-red-400 hover:text-red-300 bg-transparent border-none cursor-pointer text-lg";
+          delBtn.setAttribute("aria-label", `Remove ${p.name}`);
+          delBtn.textContent = "🗑️";
+          delBtn.onclick = () => {
+            config.providers = config.providers.filter((x) => x.id !== p.id);
+            removeProviderFromRoles(p.id);
+            renderStep1();
+          };
+          header.appendChild(delBtn);
+        }
+
+        // Card body
+        const body = document.createElement("div");
+        body.className = `card-body p-4 space-y-3 ${!p.enabled ? "collapsed" : ""}`;
+
+        // Model ID (show resolved model when modelId is null/unset)
+        const modelValue = p.modelId || p.resolvedModelId || "";
+        body.appendChild(
+          fieldRow(
+            "Model ID",
+            "text",
+            modelValue,
+            `model-${p.id}`,
+            "e.g., gemma4:31b-cloud",
+            (val) => {
+              p.modelId = val;
+            },
+            false,
+          ),
+        );
+
+        // Base URL
+        body.appendChild(
+          fieldRow(
+            "Base URL",
+            "url",
+            p.baseUrl,
+            `url-${p.id}`,
+            "",
+            (val) => {
+              p.baseUrl = val;
+            },
+            builtin,
+          ),
+        );
+
+        // API Key
+        const keyRow = document.createElement("div");
+        keyRow.className = "flex items-center gap-2";
+        const keyLabel = document.createElement("label");
+        keyLabel.className = "text-sm text-gray-400 w-24 flex-shrink-0";
+        keyLabel.setAttribute("for", `key-${p.id}`);
+        keyLabel.textContent = "API Key";
+        const keyWrap = document.createElement("div");
+        keyWrap.className = "flex-1 flex items-center gap-2";
+        const keyInput = document.createElement("input");
+        keyInput.type = "password";
+        keyInput.autocomplete = "off";
+        keyInput.id = `key-${p.id}`;
+        keyInput.className = "flex-1 bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-white text-sm";
+        keyInput.value = p.apiKey || "";
+        keyInput.placeholder = isKeyRequired(p.id) ? "Required" : "Optional (leave blank)";
+        keyInput.oninput = () => {
+          p.apiKey = keyInput.value;
+          validateStep1();
+        };
+        const toggleVis = document.createElement("button");
+        toggleVis.className = "touch-target text-gray-400 hover:text-white bg-transparent border-none cursor-pointer";
+        toggleVis.setAttribute("aria-label", "Toggle key visibility");
+        toggleVis.textContent = "👁️";
+        toggleVis.onclick = () => {
+          keyInput.type = keyInput.type === "password" ? "text" : "password";
+        };
+        keyWrap.appendChild(keyInput);
+        keyWrap.appendChild(toggleVis);
+        keyRow.appendChild(keyLabel);
+        keyRow.appendChild(keyWrap);
+        body.appendChild(keyRow);
+
+        // Test Connection
+        const testRow = document.createElement("div");
+        testRow.className = "flex items-center gap-2";
+        const testBtn = document.createElement("button");
+        testBtn.className = "btn-neon touch-target bg-gray-700 text-white text-sm";
+        testBtn.textContent = "Test Connection";
+        testBtn.onclick = () => testConnection(p, statusSpan, testBtn);
+        testRow.appendChild(testBtn);
+        body.appendChild(testRow);
+
+        // Custom headers (collapsible)
+        const headersToggle = document.createElement("button");
+        headersToggle.className =
+          "text-sm text-gray-400 hover:text-white cursor-pointer bg-transparent border-none underline";
+        headersToggle.textContent = "▸ Custom Headers";
+        headersToggle.onclick = () => {
+          const content = body.querySelector(".custom-headers-content");
+          content.classList.toggle("open");
+          headersToggle.textContent = content.classList.contains("open") ? "▾ Custom Headers" : "▸ Custom Headers";
+        };
+        body.appendChild(headersToggle);
+
+        const headersContent = document.createElement("div");
+        headersContent.className = "custom-headers-content collapsible-content";
+        const headersList = document.createElement("div");
+        headersList.className = "space-y-1";
+        headersContent.appendChild(headersList);
+        const addHeaderBtn = document.createElement("button");
+        addHeaderBtn.className = "text-xs text-cyan-400 hover:text-cyan-300 cursor-pointer bg-transparent border-none";
+        addHeaderBtn.textContent = "+ Add header";
+        addHeaderBtn.onclick = () => {
+          const row = document.createElement("div");
+          row.className = "flex gap-2 items-center";
+          row.innerHTML =
+            '<input class="flex-1 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-xs" placeholder="Key"><input class="flex-1 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-xs" placeholder="Value"><button class="touch-target text-red-400 bg-transparent border-none cursor-pointer text-xs" onclick="this.parentElement.remove()">✕</button>';
+          headersList.appendChild(row);
+        };
+        headersContent.appendChild(addHeaderBtn);
+        body.appendChild(headersContent);
+
+        card.appendChild(header);
+        card.appendChild(body);
+        return card;
+      }
+
+      function fieldRow(label, type, value, id, placeholder, onChange, disabled) {
+        const row = document.createElement("div");
+        const lbl = document.createElement("label");
+        lbl.className = "text-sm text-gray-400";
+        lbl.setAttribute("for", id);
+        lbl.textContent = label;
+        const input = document.createElement("input");
+        input.type = type;
+        input.id = id;
+        input.className = "w-full bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-white text-sm mt-1";
+        input.value = value;
+        input.placeholder = placeholder;
+        input.disabled = disabled;
+        if (disabled) input.classList.add("opacity-60");
+        input.oninput = () => onChange(input.value);
+        row.appendChild(lbl);
+        row.appendChild(input);
+        return row;
+      }
+
+      function isKeyRequired(pid) {
+        return pid !== "ollama";
+      }
+
+      function statusLabel(status) {
+        if (!status) return "Untested";
+        return status.ok ? "Connected" : `Failed: ${status.message || "unknown"}`;
+      }
+
+      async function testConnection(p, statusEl, btn) {
+        const origText = btn.textContent;
+        btn.textContent = "Testing…";
+        btn.disabled = true;
+        statusEl.innerHTML =
+          '<span class="spinner" style="width:12px;height:12px;"></span> <span class="status-text">Testing…</span>';
+
+        try {
+          const resp = await fetch("/test-provider", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ provider: p }),
+            signal: AbortSignal.timeout(15000),
+          });
+          const result = await resp.json();
+          connectionResults[p.id] = result;
+          if (result.ok) {
+            statusEl.innerHTML =
+              '<span class="w-2 h-2 rounded-full bg-green-400 inline-block" aria-hidden="true"></span><span class="status-text text-green-400">✓ Connected</span>';
+          } else {
+            statusEl.innerHTML = `<span class="w-2 h-2 rounded-full bg-red-400 inline-block" aria-hidden="true"></span><span class="status-text text-red-400">✗ ${result.message}</span>`;
+          }
+        } catch (e) {
+          connectionResults[p.id] = { ok: false, message: "Request failed" };
+          statusEl.innerHTML =
+            '<span class="w-2 h-2 rounded-full bg-red-400 inline-block" aria-hidden="true"></span><span class="status-text text-red-400">✗ Request failed</span>';
+        }
+        btn.textContent = origText;
+        btn.disabled = false;
+      }
+
+      function addCustomProvider() {
+        const id = "custom-" + Date.now();
+        const newP = {
+          id,
+          name: "Custom Provider",
+          enabled: true,
+          type: "custom",
+          baseUrl: "",
+          apiKey: "",
+          modelId: "",
+          customHeaders: {},
+        };
+        config.providers.push(newP);
+        renderStep1();
+      }
+
+      function validateStep1() {
+        const count = enabledProviders().length;
+        document.getElementById("next-1").disabled = count === 0;
+      }
+
+      function removeProviderFromRoles(pid) {
+        if (!config.roles)
+          config.roles = {
+            brain: { providerId: "ollama", fallbackOrder: [] },
+            eyes: { providerId: "ollama", fallbackOrder: [] },
+          };
+        ["brain", "eyes"].forEach((role) => {
+          if (config.roles[role].providerId === pid) {
+            config.roles[role].providerId = "";
+          }
+          config.roles[role].fallbackOrder = (config.roles[role].fallbackOrder || []).filter((x) => x !== pid);
+        });
+      }
+
+      // ===== Auto-Configure =====
+      function autoConfigure() {
+        const mode = document.querySelector('input[name="auto-configure"]:checked').value;
+        const enabled = enabledProviders();
+
+        if (mode === "roles") {
+          // Just assign roles
+          if (enabled.length > 0) {
+            const primary = enabled[0].id;
+            config.roles.brain.providerId = primary;
+            config.roles.eyes.providerId = primary;
+            config.roles.brain.fallbackOrder = enabled.slice(1).map((p) => p.id);
+            config.roles.eyes.fallbackOrder = enabled.slice(1).map((p) => p.id);
+          }
+          showToast("✓ Roles auto-assigned");
+        } else {
+          // Everything: enable Ollama + check for keys
+          const changed = config.providers.some((p) => p.enabled !== (p.id === "ollama"));
+          if (changed && enabled.length > 0) {
+            // Confirm overwrite
+            showConfirm("This will reset your provider selection to recommended defaults. Continue?", () => {
+              applyDefaults();
+            });
+            return;
+          }
+          applyDefaults();
+        }
+        renderStep1();
+      }
+
+      function applyDefaults() {
+        config.providers.forEach((p) => {
+          p.enabled = p.id === "ollama";
+        });
+        config.roles.brain = { providerId: "ollama", fallbackOrder: [] };
+        config.roles.eyes = { providerId: "ollama", fallbackOrder: [] };
+        showToast("✓ Providers reset to defaults");
+        renderStep1();
+      }
+
+      // ===== Step 2: Roles =====
+      function renderStep2() {
+        const enabled = enabledProviders();
+        const emptyEl = document.getElementById("roles-empty");
+        const contentEl = document.getElementById("roles-content");
+
+        if (enabled.length === 0) {
+          emptyEl.classList.remove("hidden");
+          contentEl.classList.add("hidden");
+          return;
+        }
+        emptyEl.classList.add("hidden");
+        contentEl.classList.remove("hidden");
+
+        // Populate dropdowns
+        ["brain", "eyes"].forEach((role) => {
+          const select = document.getElementById(`${role}-primary`);
+          const current = config.roles[role]?.providerId || "";
+          select.innerHTML = '<option value="">— Select —</option>';
+          enabled.forEach((p) => {
+            const opt = document.createElement("option");
+            opt.value = p.id;
+            opt.textContent = p.name;
+            if (p.id === current) opt.selected = true;
+            select.appendChild(opt);
+          });
+
+          // Render fallback list
+          renderFallbackList(role);
+        });
+
+        validateStep2();
+      }
+
+      function renderFallbackList(role) {
+        const container = document.getElementById(`${role}-fallback-list`);
+        const fallbacks = config.roles[role]?.fallbackOrder || [];
+        const enabled = enabledProviders();
+        const usedInOther = new Set();
+
+        container.innerHTML = "";
+        fallbacks.forEach((fid, i) => {
+          const p = providerById(fid);
+          const row = document.createElement("div");
+          row.className = "flex items-center gap-2";
+          row.innerHTML = `<span class="text-gray-400 w-6 text-center">${i + 1}.</span>
+      <select class="flex-1 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-sm fallback-select" data-role="${role}" data-index="${i}">
+        <option value="">— Remove —</option>
+        ${enabled
+          .filter((ep) => ep.id !== config.roles[role].providerId)
+          .map((ep) => `<option value="${ep.id}" ${ep.id === fid ? "selected" : ""}>${ep.name}</option>`)
+          .join("")}
+      </select>
+      <button class="touch-target text-gray-400 hover:text-white bg-transparent border-none cursor-pointer" aria-label="Move up" onclick="moveFallback('${role}',${i},-1)">▲</button>
+      <button class="touch-target text-gray-400 hover:text-white bg-transparent border-none cursor-pointer" aria-label="Move down" onclick="moveFallback('${role}',${i},1)">▼</button>
+      <button class="touch-target text-red-400 hover:text-red-300 bg-transparent border-none cursor-pointer" aria-label="Remove fallback" onclick="removeFallback('${role}',${i})">✕</button>`;
+          container.appendChild(row);
+        });
+      }
+
+      function addFallback(role) {
+        if (!config.roles[role]) config.roles[role] = { providerId: "", fallbackOrder: [] };
+        if (!config.roles[role].fallbackOrder) config.roles[role].fallbackOrder = [];
+        config.roles[role].fallbackOrder.push("");
+        renderFallbackList(role);
+      }
+
+      function removeFallback(role, idx) {
+        config.roles[role].fallbackOrder.splice(idx, 1);
+        renderFallbackList(role);
+      }
+
+      function moveFallback(role, idx, dir) {
+        const order = config.roles[role].fallbackOrder;
+        const newIdx = idx + dir;
+        if (newIdx < 0 || newIdx >= order.length) return;
+        [order[idx], order[newIdx]] = [order[newIdx], order[idx]];
+        renderFallbackList(role);
+      }
+
+      function toggleAdvanced(role) {
+        const el = document.getElementById(`${role}-fallback`);
+        el.classList.toggle("open");
+      }
+
+      function validateStep2() {
+        const brain = document.getElementById("brain-primary")?.value;
+        const eyes = document.getElementById("eyes-primary")?.value;
+        document.getElementById("next-2").disabled = !brain || !eyes;
+      }
+
+      // ===== Step 3: Summary =====
+      async function renderStep3() {
+        const enabled = enabledProviders();
+
+        // Role summary
+        ["brain", "eyes"].forEach((role) => {
+          const pid = config.roles[role]?.providerId || "";
+          const p = providerById(pid);
+          document.getElementById(`sum-${role}-primary`).textContent = p ? p.name : "—";
+
+          const fallbacks = (config.roles[role]?.fallbackOrder || []).map((fid) => {
+            const fp = providerById(fid);
+            return fp ? fp.name : fid;
+          });
+          document.getElementById(`sum-${role}-fallback`).textContent =
+            fallbacks.length > 0 ? fallbacks.join(", ") : "—";
+        });
+
+        // Providers summary
+        const pSum = document.getElementById("providers-summary");
+        pSum.innerHTML = '<h3 class="text-sm text-gray-400 font-semibold mb-2">Enabled Providers</h3>';
+        enabled.forEach((p) => {
+          const status = connectionResults[p.id];
+          const statusHtml = status?.ok
+            ? '<span class="text-green-400">✓ Connected</span>'
+            : status
+              ? `<span class="text-red-400">✗ ${status.message}</span>`
+              : '<span class="text-gray-500">– Untested</span>';
+          const keyDisplay = p.apiKey ? maskKey(p.apiKey) : "—";
+          const div = document.createElement("div");
+          div.className = "flex items-center justify-between py-2 border-b border-gray-700 last:border-b-0";
+          div.innerHTML = `<div><span class="font-medium">${p.name}</span> <span class="text-sm text-gray-400">${p.modelId || "default model"}</span></div><div class="flex items-center gap-3"><span class="text-xs text-gray-500">Key: ${keyDisplay}</span>${statusHtml}</div>`;
+          pSum.appendChild(div);
+        });
+
+        // Validation + reachability check
+        const warnings = [];
+        const criticals = [];
+
+        ["brain", "eyes"].forEach((role) => {
+          const pid = config.roles[role]?.providerId;
+          const p = providerById(pid);
+          if (!p) {
+            criticals.push(`${role} has no primary provider`);
+            return;
+          }
+          if (isKeyRequired(pid) && !p.apiKey) {
+            criticals.push(`${role}: ${p.name} requires an API key`);
+          }
+          const status = connectionResults[pid];
+          if (status && !status.ok) {
+            criticals.push(`${role}: ${p.name} is unreachable`);
+          }
+        });
+
+        if (enabled.length === 0) {
+          criticals.push("No providers enabled");
+        }
+
+        const banner = document.getElementById("alert-banner");
+        if (criticals.length > 0) {
+          banner.textContent = criticals.join(". ") + ".";
+          banner.classList.remove("hidden");
+          document.getElementById("launch-btn").disabled = true;
+        } else {
+          banner.classList.add("hidden");
+          document.getElementById("launch-btn").disabled = false;
+        }
+
+        // Auto-test primaries if not already tested
+        for (const role of ["brain", "eyes"]) {
+          const pid = config.roles[role]?.providerId;
+          if (pid && !connectionResults[pid]) {
+            const p = providerById(pid);
+            if (p) await testConnectionSilent(p);
+          }
+        }
+      }
+
+      async function testConnectionSilent(p) {
+        try {
+          const resp = await fetch("/test-provider", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ provider: p }),
+            signal: AbortSignal.timeout(15000),
+          });
+          connectionResults[p.id] = await resp.json();
+        } catch {
+          connectionResults[p.id] = { ok: false, message: "Request failed" };
+        }
+      }
+
+      // ===== Launch / Save =====
+      async function pollForRedirect() {
+        let failCount = 0;
+        const maxChecks = 30; // 30 seconds at 1s intervals
+        for (let i = 0; i < maxChecks; i++) {
+          await new Promise((r) => setTimeout(r, 1000));
+          try {
+            const resp = await fetch("/status");
+            const data = await resp.json();
+            failCount = 0;
+            if (data.phase !== "wizard") {
+              window.location.href = "/design_shell.html";
+              return;
+            }
+          } catch (e) {
+            failCount++;
+            if (failCount >= 10) {
+              const banner = document.createElement("div");
+              banner.style.cssText =
+                "position:fixed;bottom:1.5rem;left:1.5rem;right:1.5rem;background:#FF4466;color:white;padding:0.75rem;border-radius:8px;text-align:center;z-index:300;";
+              banner.textContent = "⚠️ Backend didn't start — check terminal for errors";
+              document.body.appendChild(banner);
+              document.getElementById("launch-btn").textContent = "Start Design Loop";
+              document.getElementById("launch-btn").disabled = false;
+              return;
+            }
+          }
+        }
+        const banner = document.createElement("div");
+        banner.style.cssText =
+          "position:fixed;bottom:1.5rem;left:1.5rem;right:1.5rem;background:#FFB347;color:#0A0A0F;padding:0.75rem;border-radius:8px;text-align:center;z-index:300;";
+        banner.textContent = "⚠️ Backend is taking longer than expected. Check terminal.";
+        document.body.appendChild(banner);
+      }
+
+      async function handleLaunch() {
+        const btn = document.getElementById("launch-btn");
+        btn.disabled = true;
+        btn.textContent = "Saving…";
+
+        // Update roles from dropdowns if on step 2/3
+        ["brain", "eyes"].forEach((role) => {
+          const select = document.getElementById(`${role}-primary`);
+          if (select) config.roles[role].providerId = select.value;
+        });
+
+        try {
+          const resp = await fetch("/save-providers", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(config),
+          });
+          if (!resp.ok) throw new Error("Save failed");
+
+          if (isSetupMode) {
+            btn.textContent = "✓ Saved — Starting…";
+            showToast("✓ Settings saved to providers.json");
+            pollForRedirect();
+          } else {
+            showToast("✓ Settings saved");
+            // Reload design shell after brief delay
+            setTimeout(() => {
+              window.location.href = "/design_shell.html";
+            }, 1000);
+          }
+        } catch (e) {
+          btn.textContent = isSetupMode ? "Start Design Loop" : "Save & Apply";
+          btn.disabled = false;
+          showAlert("Failed to save settings");
+        }
+      }
+
+      // ===== Close / Reset =====
+      function handleClose() {
+        if (isDirty()) {
+          showConfirm("Discard changes?", () => {
+            window.location.href = "/design_shell.html";
+          });
+        } else {
+          window.location.href = "/design_shell.html";
+        }
+      }
+
+      function isDirty() {
+        return JSON.stringify(config) !== JSON.stringify(originalConfig);
+      }
+
+      function handleReset() {
+        showConfirm("Reset all providers to Ollama defaults? This will clear all custom configuration.", () => {
+          config = JSON.parse(JSON.stringify(originalConfig)) || ProviderConfig_default();
+          applyDefaults();
+          renderStep1();
+        });
+      }
+
+      function ProviderConfig_default() {
+        return {
+          providers: [
+            {
+              id: "ollama",
+              name: "Ollama",
+              enabled: true,
+              type: "builtin",
+              baseUrl: "http://localhost:11434",
+              apiKey: "",
+              modelId: null,
+              customHeaders: {},
+            },
+            {
+              id: "openrouter",
+              name: "OpenRouter",
+              enabled: false,
+              type: "builtin",
+              baseUrl: "https://openrouter.ai/api",
+              apiKey: "",
+              modelId: null,
+              customHeaders: {},
+            },
+            {
+              id: "openai",
+              name: "OpenAI",
+              enabled: false,
+              type: "builtin",
+              baseUrl: "https://api.openai.com",
+              apiKey: "",
+              modelId: null,
+              customHeaders: {},
+            },
+            {
+              id: "anthropic",
+              name: "Anthropic",
+              enabled: false,
+              type: "builtin",
+              baseUrl: "https://api.anthropic.com",
+              apiKey: "",
+              modelId: null,
+              customHeaders: {},
+            },
+            {
+              id: "deepseek",
+              name: "DeepSeek",
+              enabled: false,
+              type: "builtin",
+              baseUrl: "https://api.deepseek.com",
+              apiKey: "",
+              modelId: null,
+              customHeaders: {},
+            },
+          ],
+          roles: {
+            brain: { providerId: "ollama", fallbackOrder: [] },
+            eyes: { providerId: "ollama", fallbackOrder: [] },
+          },
+        };
+      }
+
+      // ===== Modal =====
+      function showConfirm(message, onConfirm) {
+        const modal = document.getElementById("confirm-modal");
+        document.getElementById("confirm-message").textContent = message;
+        modal.classList.remove("hidden");
+        const actionBtn = document.getElementById("confirm-action");
+        actionBtn.onclick = () => {
+          onConfirm();
+          closeModal("confirm-modal");
+        };
+        // Focus trap
+        actionBtn.focus();
+      }
+
+      function closeModal(id) {
+        document.getElementById(id).classList.add("hidden");
+      }
+
+      // ===== Keyboard =====
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") {
+          const modal = document.getElementById("confirm-modal");
+          if (!modal.classList.contains("hidden")) {
+            closeModal("confirm-modal");
+            return;
+          }
+          if (!isSetupMode && currentStep > 1) {
+            goToStep(currentStep - 1);
+          }
+        }
+
+        // Enter advances step only when not in text input
+        if (e.key === "Enter" && !isSetupMode) {
+          const tag = e.target.tagName.toLowerCase();
+          if (tag === "input" || tag === "textarea" || tag === "select") return;
+          if (currentStep === 1 && enabledProviders().length > 0) goToStep(2);
+          else if (currentStep === 2) goToStep(3);
+        }
+      });
+    </script>
+  </body>
+</html>

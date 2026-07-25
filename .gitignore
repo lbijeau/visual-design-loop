@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Secrets / local config (NEVER commit)
+providers.json
+.env
+*.log
+
+# Dependencies
+node_modules/
+
+# Runtime / generated state (do not commit)
+theme.json
+summary.json
+version.txt
+current_render.html
+final_result.html
+run_state/
+reports/
+screenshots/
+tmp*.js
+tmp*.html
+*-iter*.png
+.playwright-mcp/
+*.swp

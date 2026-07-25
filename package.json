@@ -1,0 +1,14 @@
+{
+  "name": "visual-design-loop",
+  "version": "1.0.0",
+  "description": "StyleSentry: a visual-first design loop that generates UIs and audits its own output across breakpoints and interaction states.",
+  "scripts": {
+    "capture": "node capture.js"
+  },
+  "keywords": ["design", "llm", "playwright", "visual-audit", "ui-generation", "ollama"],
+  "author": "Luc Bijeau",
+  "license": "MIT",
+  "dependencies": {
+    "playwright": "^1.61.1"
+  }
+}

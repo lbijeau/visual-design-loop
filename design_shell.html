@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Design Loop Shell</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/design_shell.css" />
+  </head>
+  <body>
+    <div id="preview-container">
+      <iframe id="preview-frame" src="/current_render.html" style="width: 100%; height: 100%; border: none"></iframe>
+    </div>
+    <div id="control-panel">
+      <div id="status-bar">
+        <span id="status-icon">⏳</span>
+        <span id="status-text">Starting...</span>
+        <span id="status-message"></span>
+        <span id="model-badge" style="display: none"></span>
+        <span id="iteration-badge" style="display: none"></span>
+        <span id="feedback-badge" style="display: none"></span>
+        <a
+          id="settings-link"
+          href="/provider_wizard.html?mode=settings"
+          aria-label="Provider settings"
+          title="Provider Settings"
+          >⚙️</a
+        >
+      </div>
+      <div id="error-banner" class="hidden"></div>
+      <div id="audit-panel">
+        <div class="audit-header">
+          <span class="audit-summary">Waiting for first audit...</span
+          ><span id="filter-toggles" style="display: none"></span>
+        </div>
+      </div>
+      <div id="input-area">
+        <input
+          type="text"
+          id="feedback-input"
+          placeholder="Enter feedback — or DONE to accept, SAVE to save draft, UNDO to revert"
+        />
+        <button id="submit-btn">Submit & Refine</button>
+        <button id="undo-btn" title="Restore the previous iteration">↩ Undo</button>
+        <button id="save-btn" title="Save current design as a standalone draft">💾 Save Draft</button>
+        <button id="accept-btn" title="Accept the current design and finish">✓ Accept & Finish</button>
+      </div>
+    </div>
+    <div id="prompt-overlay" class="hidden">
+      <div id="prompt-card">
+        <h2><span aria-hidden="true">✍️</span> What are we building?</h2>
+        <textarea id="prompt-textarea" placeholder="Describe the website you want to create..."></textarea>
+        <p style="font-size: 0.8rem; color: #888; margin: 0.75rem 0 0.25rem">Quick picks:</p>
+        <div class="quick-picks" id="quick-picks"></div>
+        <button id="start-btn" onclick="submitPrompt()">Start →</button>
+      </div>
+    </div>
+    <script>
+      const PHASE_MAP = {
+        wizard: { icon: "⚙️", text: "Provider config" },
+        "awaiting-intent": { icon: "✍️", text: "Define your project" },
+        "generating-theme": { icon: "⚡", text: "Generating design theme..." },
+        "generating-code": { icon: "⚡", text: "Generating code..." },
+        rendering: { icon: "📸", text: "Rendering preview..." },
+        auditing: { icon: "🔍", text: "Analyzing screenshot..." },
+        "awaiting-feedback": { icon: "💬", text: "Ready for feedback" },
+        converged: { icon: "✅", text: "Design converged" },
+      };
+      const LOOP_PHASES = ["generating-code", "rendering", "auditing", "awaiting-feedback"];
+      const statusIcon = document.getElementById("status-icon");
+      const statusText = document.getElementById("status-text");
+      const modelBadge = document.getElementById("model-badge");
+      const iterationBadge = document.getElementById("iteration-badge");
+      const feedbackBadge = document.getElementById("feedback-badge");
+      const auditPanel = document.getElementById("audit-panel");
+      let filterToggles = document.getElementById("filter-toggles");
+      const promptOverlay = document.getElementById("prompt-overlay");
+      const promptTextarea = document.getElementById("prompt-textarea");
+      const input = document.getElementById("feedback-input");
+      const btn = document.getElementById("submit-btn");
+      const statusMessage = document.getElementById("status-message");
+      const errorBanner = document.getElementById("error-banner");
+      const undoBtn = document.getElementById("undo-btn");
+      const acceptBtn = document.getElementById("accept-btn");
+      const saveBtn = document.getElementById("save-btn");
+      let prevAuditStr = null;
+      let activeFilter = null;
+      let lastAuditData = null;
+
+      async function loadQuickPicks() {
+        try {
+          const resp = await fetch("/prompt_templates.json");
+          const templates = await resp.json();
+          const container = document.getElementById("quick-picks");
+          container.textContent = "";
+          templates.forEach((t) => {
+            const b = document.createElement("button");
+            b.className = "quick-pick";
+            b.textContent = t.label;
+            b.addEventListener("click", () => fillPrompt(t.text));
+            container.appendChild(b);
+          });
+        } catch (e) {}
+      }
+      function fillPrompt(text) {
+        promptTextarea.value = text;
+        promptTextarea.focus();
+      }
+      async function submitPrompt() {
+        const intent = promptTextarea.value.trim();
+        if (!intent) return;
+        document.getElementById("start-btn").disabled = true;
+        document.getElementById("start-btn").textContent = "Starting...";
+        try {
+          await fetch("/start", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ intent }),
+          });
+          promptOverlay.classList.add("hidden");
+        } catch (e) {
+          document.getElementById("start-btn").disabled = false;
+          document.getElementById("start-btn").textContent = "Start →";
+        }
+      }
+      async function updateStatus() {
+        try {
+          const resp = await fetch("/status");
+          const data = await resp.json();
+          const m = PHASE_MAP[data.phase] || { icon: "⏳", text: data.message || "Working..." };
+          statusIcon.textContent = m.icon;
+          statusText.textContent = m.text;
+          statusMessage.textContent = data.message || "";
+          if (data.error) {
+            errorBanner.textContent = "⚠ " + data.error;
+            errorBanner.classList.remove("hidden");
+          } else {
+            errorBanner.classList.add("hidden");
+          }
+          if (data.model_label) {
+            modelBadge.style.display = "inline-block";
+            modelBadge.textContent = data.model_label;
+          } else {
+            modelBadge.style.display = "none";
+          }
+          if (LOOP_PHASES.includes(data.phase)) {
+            iterationBadge.style.display = "inline-block";
+            iterationBadge.textContent = "Iteration " + data.iteration + "/" + data.max_iterations;
+          } else {
+            iterationBadge.style.display = "none";
+          }
+          if (data.feedback_count > 0) {
+            feedbackBadge.style.display = "inline-block";
+            feedbackBadge.textContent = data.feedback_count + " feedback" + (data.feedback_count > 1 ? "s" : "");
+          } else {
+            feedbackBadge.style.display = "none";
+          }
+          if (data.phase === "awaiting-intent") {
+            promptOverlay.classList.remove("hidden");
+          } else {
+            promptOverlay.classList.add("hidden");
+          }
+          const waiting = data.phase === "awaiting-feedback";
+          btn.disabled = !waiting;
+          acceptBtn.disabled = !waiting;
+          undoBtn.disabled = !waiting || !data.can_undo;
+        } catch (e) {
+          statusText.textContent = "Backend disconnected";
+        }
+      }
+      function setFilter(sev) {
+        activeFilter = sev;
+        if (lastAuditData) renderAudit(lastAuditData);
+      }
+      function renderAudit(data) {
+        lastAuditData = data;
+        let html = "";
+        if (data.overall_score !== undefined)
+          html += '<div><span class="audit-score">Score: ' + data.overall_score + "/100</span></div>";
+        if (data.summary) html += '<div class="audit-summary">' + data.summary + "</div>";
+        if (data.bugs && data.bugs.length > 0) {
+          const sevs = new Set(data.bugs.map((b) => (b.severity || "minor").toLowerCase()));
+          let toggleHtml = "";
+          ["critical", "important", "minor"].forEach((sev) => {
+            if (sevs.has(sev))
+              toggleHtml += `<button class="audit-toggle${activeFilter === sev ? " active" : ""}" onclick="setFilter('${sev}')">${sev.charAt(0).toUpperCase() + sev.slice(1)}</button>`;
+          });
+          toggleHtml +=
+            '<button class="audit-toggle' +
+            (activeFilter === null ? " active" : "") +
+            '" onclick="setFilter(null)">All</button>';
+          filterToggles.innerHTML = toggleHtml;
+          filterToggles.style.display = "";
+          const visible = activeFilter
+            ? data.bugs.filter((b) => (b.severity || "minor").toLowerCase() === activeFilter)
+            : data.bugs;
+          const hidden = data.bugs.length - visible.length;
+          html +=
+            '<div style="font-size:0.75rem;color:#888;margin-top:0.25rem;">Bugs (' +
+            visible.length +
+            (hidden > 0 ? " shown, " + hidden + " hidden" : "") +
+            "):</div>";
+          data.bugs.forEach((bug) => {
+            const sev = (bug.severity || "").toLowerCase();
+            const cls = activeFilter && activeFilter !== sev ? " hidden" : "";
+            html +=
+              '<div class="audit-bug ' +
+              sev +
+              cls +
+              '">' +
+              (sev === "critical" ? "⚠️" : "🔧") +
+              " " +
+              bug.issue +
+              " (" +
+              (bug.location || "?") +
+              ")</div>";
+          });
+        } else {
+          filterToggles.innerHTML = "";
+          filterToggles.style.display = "none";
+        }
+        if (data.views && Object.keys(data.views).length > 1) {
+          html +=
+            '<div class="view-chips">' +
+            Object.entries(data.views)
+              .map(
+                ([id, v]) =>
+                  '<span class="view-chip' +
+                  (v.score >= 95 && !v.close_failed ? " pass" : "") +
+                  '">' +
+                  id +
+                  " " +
+                  v.score +
+                  "/100</span>",
+              )
+              .join("") +
+            "</div>";
+        }
+        auditPanel.innerHTML = '<div class="audit-header"><div>' + html + "</div>" + filterToggles.outerHTML + "</div>";
+        // Re-query: innerHTML detaches the old element, creating a new one
+        let fresh = document.getElementById("filter-toggles");
+        if (fresh) filterToggles = fresh;
+      }
+      async function updateAudit() {
+        try {
+          const resp = await fetch("/audit-latest");
+          const data = await resp.json();
+          if (Object.keys(data).length === 0) return;
+          const auditStr = JSON.stringify(data);
+          if (auditStr === prevAuditStr) return;
+          prevAuditStr = auditStr;
+          renderAudit(data);
+        } catch (e) {}
+      }
+      btn.onclick = async () => {
+        const feedback = input.value.trim();
+        btn.disabled = true;
+        await fetch("/submit-feedback", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ feedback }),
+        });
+        input.value = "";
+        input.focus();
+      };
+      input.onkeydown = (e) => {
+        if (e.key === "Enter") btn.click();
+      };
+      async function postAction(action, button) {
+        button.disabled = true;
+        try {
+          await fetch("/action", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action }),
+          });
+        } catch (e) {}
+      }
+      acceptBtn.onclick = () => postAction("accept", acceptBtn);
+      undoBtn.onclick = () => postAction("undo", undoBtn);
+      saveBtn.onclick = () => postAction("save", saveBtn);
+      loadQuickPicks();
+      updateStatus();
+      updateAudit();
+      setInterval(updateStatus, 5000);
+      setInterval(updateAudit, 5000);
+    </script>
+  </body>
+</html>

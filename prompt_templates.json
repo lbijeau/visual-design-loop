@@ -1,0 +1,8 @@
+[
+  {"label": "Portfolio", "text": "A personal portfolio website with a hero section, project gallery, about section, and contact form"},
+  {"label": "SaaS Landing", "text": "A SaaS product landing page with feature highlights, pricing tiers, testimonials, and a call-to-action"},
+  {"label": "Blog", "text": "A clean blog homepage with a featured post, recent posts grid, category sidebar, and newsletter signup"},
+  {"label": "E-commerce", "text": "An e-commerce product page with image gallery, product details, reviews, and add-to-cart"},
+  {"label": "Dashboard", "text": "An analytics dashboard with KPI cards, charts, a data table, and a sidebar navigation"},
+  {"label": "Landing page", "text": "A modern landing page for a mobile app with hero, features, screenshots, and download CTA"}
+]

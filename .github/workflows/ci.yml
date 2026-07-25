@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # Pin ruff so local and CI lint/format verdicts stay identical
+      # (rules drift between ruff releases). The project's own runtime deps
+      # come from requirements.txt — without them, collection fails on
+      # `import requests` in llm_client/export.
+      - name: Install Python tools and project deps
+        run: |
+          pip install ruff==0.15.21 pytest
+          pip install -r requirements.txt
+
+      # npm ci populates node_modules so the smoke test's `require('playwright')`
+      # probe resolves; playwright install then provisions the chromium binary so
+      # test_smoke_loop runs instead of self-skipping. Drop this step to let it
+      # skip (faster, less coverage).
+      - name: Install Node deps + Chromium
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Ruff lint
+        run: ruff check .
+
+      - name: Ruff format check
+        run: ruff format --check .
+
+      - name: Pytest
+        run: pytest

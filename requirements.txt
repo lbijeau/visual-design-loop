@@ -1,0 +1,3 @@
+# Runtime dependencies for the visual-design-loop project.
+# Node/Playwright deps live in package.json; test/lint tools are installed by CI.
+requests>=2.31
