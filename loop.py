@@ -26,6 +26,11 @@ KEYWORD_ACTIONS = {"DONE": "accept", "KEEP": "accept", "UNDO": "undo", "SAVE": "
 RESERVED_AXIS_WORDS = {"hover", "focus"}
 SYNTHETIC_TAGS = {"close_failed", "missing_focus"}
 
+# Wall-clock ceiling for calls that emit a whole HTML file. Sized for slow local
+# models: a multi-view app runs ~60k chars, which a ~70 chars/s endpoint streams
+# in ~14 min. llm_client.IDLE_TIMEOUT still aborts a genuinely stalled stream.
+FULL_FILE_TIMEOUT = 1800
+
 DIFF_INSTRUCTION = """\
 Output ONLY SEARCH/REPLACE edit blocks for the changes needed to fix the reported issues — nothing else, no full file, no prose.
 Each block has this exact form:
@@ -452,7 +457,7 @@ class FrontendDesignLoop:
         Output ONLY the complete HTML file content. Do not include markdown blocks.
         """
         self.current_code = llm_client.call_llm(
-            "brain", prompt, system_prompt=BRAIN_SYSTEM_PROMPT, timeout=900, provider_config=self.provider_config
+            "brain", prompt, system_prompt=BRAIN_SYSTEM_PROMPT, timeout=FULL_FILE_TIMEOUT, provider_config=self.provider_config
         )
         self.current_code = self.current_code.replace("```html", "").replace("```", "").strip()
 
@@ -693,7 +698,7 @@ class FrontendDesignLoop:
             full_prompt,
             system_prompt=BRAIN_SYSTEM_PROMPT,
             image_path=image_path,
-            timeout=900,
+            timeout=FULL_FILE_TIMEOUT,
             retries=1,
             provider_config=self.provider_config,
         )

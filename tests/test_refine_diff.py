@@ -8,7 +8,7 @@ from pathlib import Path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import llm_client
-from loop import FrontendDesignLoop
+from loop import FULL_FILE_TIMEOUT, FrontendDesignLoop
 from run_state import RunState
 
 BASE = "<!DOCTYPE html>\n<html>\n<body>\n<h1>Old Title</h1>\n</body>\n</html>"
@@ -68,7 +68,7 @@ def test_unmatched_block_triggers_fallback():
         lo = _loop()
         lo.refine_code(_audit(), image_path=None, human_feedback=None)
         assert "REBUILT" in lo.current_code
-        assert kinds == [600, 900]  # diff at 600, fallback at 900
+        assert kinds == [600, FULL_FILE_TIMEOUT]  # diff at 600, fallback at the full-file ceiling
     finally:
         llm_client.call_llm = orig
     print("✅")
@@ -112,7 +112,7 @@ def test_theme_change_feedback_uses_diff():
         # feedback contains a theme keyword ("blue") -> theme path is now diff-first
         lo.refine_code(_audit(), image_path=None, human_feedback="make the title blue")
         assert "<h1>Blue Title</h1>" in lo.current_code
-        assert timeouts == [600]  # diff path taken (600); no full-file (900)
+        assert timeouts == [600]  # diff path taken (600); no full-file call
     finally:
         llm_client.call_llm = orig
     print("✅")
@@ -157,7 +157,7 @@ def test_diff_call_timeout_routes_to_fallback():
         lo = _loop()
         lo.refine_code(_audit(), image_path=None, human_feedback=None)
         assert "RECOVERED" in lo.current_code
-        assert timeouts == [600, 900]  # diff attempted (600), then full-file fallback (900)
+        assert timeouts == [600, FULL_FILE_TIMEOUT]  # diff attempted (600), then full-file fallback
     finally:
         llm_client.call_llm = orig
     print("✅")
@@ -177,7 +177,7 @@ def test_pivot_routes_to_full_file():
         lo.history = ["fix the title"]  # visual_summary already seen -> oscillation -> pivot
         lo.refine_code(_audit(summary="fix the title"), image_path=None, human_feedback=None)
         assert "PIVOTED" in lo.current_code
-        assert 900 in timeouts and 600 not in timeouts  # full-file path, diffs skipped
+        assert FULL_FILE_TIMEOUT in timeouts and 600 not in timeouts  # full-file path, diffs skipped
     finally:
         llm_client.call_llm = orig
     print("✅")
@@ -198,7 +198,7 @@ def test_blockless_non_document_routes_to_fallback():
         lo = _loop()
         lo.refine_code(_audit(), image_path=None, human_feedback=None)
         assert "REGEN" in lo.current_code
-        assert timeouts == [600, 900]  # diff (600) parsed 0 blocks, non-doc -> fallback (900)
+        assert timeouts == [600, FULL_FILE_TIMEOUT]  # diff (600) parsed 0 blocks, non-doc -> fallback
     finally:
         llm_client.call_llm = orig
     print("✅")

@@ -40,8 +40,16 @@ def build_ollama_payload(
         "model": model_id,
         "messages": messages,
         "stream": True,
-        "format": response_format,
     }
+    # Ollama accepts only "json" or a JSON Schema here; "text" is rejected mid-stream by the
+    # local inference path (the cloud proxy ignores the field, so this only bit local models).
+    # Plain text is the default behaviour when `format` is absent.
+    if response_format and response_format != "text":
+        payload["format"] = response_format
+    # Thinking tokens are discarded by _consume_stream_line, so they only consume the wall-clock
+    # deadline. Some thinking-capable models never emit content at all with it on. Providers that
+    # want it back can set "think": true.
+    payload["think"] = bool(provider.get("think", False))
     return url, headers, payload
 
 

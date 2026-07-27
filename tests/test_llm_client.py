@@ -29,10 +29,40 @@ def test_build_ollama_payload():
     assert url == "http://localhost:11434/api/chat"
     assert payload["model"] == "gemma4:9b"
     assert payload["stream"] is True
-    assert payload["format"] == "text"
+    assert "format" not in payload  # plain text -> field omitted; "text" is not a valid Ollama format
     assert payload["messages"] == messages
     url, headers, payload = llm_client.build_ollama_payload(provider, messages, "gemma4:9b", response_format="json")
     assert payload["format"] == "json"
+    print("✅")
+
+
+def test_ollama_payload_omits_text_format():
+    """Regression: Ollama's local inference path rejects format:"text" mid-stream.
+
+    Only "json" or a JSON Schema are valid; the field must be absent for plain text.
+    The cloud proxy ignores `format`, so this only ever bit locally-served models.
+    """
+    print("  test_ollama_payload_omits_text_format...", end=" ")
+    provider = {"id": "ollama", "baseUrl": "http://localhost:11434", "apiKey": "", "customHeaders": {}}
+    _, _, payload = llm_client.build_ollama_payload(provider, [], "qwen3.5:4b", response_format="text")
+    assert "format" not in payload
+    _, _, payload = llm_client.build_ollama_payload(provider, [], "qwen3.5:4b")  # default is "text"
+    assert "format" not in payload
+    print("✅")
+
+
+def test_ollama_payload_disables_thinking_by_default():
+    """Thinking tokens are discarded by _consume_stream_line, so they only burn the deadline.
+
+    Some thinking-capable models (e.g. qwen3.5:4b) never emit content at all with thinking
+    on. Default it off; a provider may opt back in with "think": true.
+    """
+    print("  test_ollama_payload_disables_thinking_by_default...", end=" ")
+    provider = {"id": "ollama", "baseUrl": "http://localhost:11434", "apiKey": "", "customHeaders": {}}
+    _, _, payload = llm_client.build_ollama_payload(provider, [], "qwen3.5:4b")
+    assert payload["think"] is False
+    _, _, payload = llm_client.build_ollama_payload({**provider, "think": True}, [], "qwen3.5:4b")
+    assert payload["think"] is True
     print("✅")
 
 
