@@ -5,7 +5,12 @@ async function capture(filePath) {
   const browser = await chromium.launch();
   const context = await browser.newContext({
     viewport: { width: 1280, height: 800 },
-    deviceScaleFactor: 2,
+    // 1, not 2: these screenshots are consumed by the vision auditor, not by a human.
+    // At 2x a 1280px layout is sent as a 2880x1800 image = 4608 image tokens and ~47 s
+    // of prefill per audit cell; at 1x it is 1608 tokens and ~9.7 s (measured 2026-08-09,
+    // Qwen3.6-35B-A3B + mmproj). The CSS geometry is identical — only Retina pixel
+    // density is discarded. capture_shell.js stays at 2x for the human-facing preview.
+    deviceScaleFactor: 1,
   });
   const page = await context.newPage();
 
@@ -319,9 +324,16 @@ async function capture(filePath) {
   async function clickTrigger(kind, id) {
     await page.evaluate(
       ([k, i]) => {
-        const el = document.querySelector(`[data-${k}="${i}"]`);
-        if (!el) throw new Error(`no [data-${k}] trigger found`);
-        el.click();
+        const all = Array.from(document.querySelectorAll(`[data-${k}="${i}"]`));
+        if (!all.length) throw new Error(`no [data-${k}] trigger found`);
+        // With duplicates (desktop nav + mobile menu + footer), prefer a trigger that is
+        // actually laid out at this breakpoint; fall back to the first in DOM order so
+        // behaviour is unchanged for the single-trigger case.
+        const visible = all.find((el) => {
+          const r = el.getBoundingClientRect();
+          return r.width > 0 && r.height > 0;
+        });
+        (visible || all[0]).click();
       },
       [kind, id],
     );
@@ -440,7 +452,18 @@ async function capture(filePath) {
     for (const id of viewIds) {
       if (seenViews.has(id)) continue; // one record per id per bp
       seenViews.add(id);
-      const err = idError("view", id, duplicateViewIds);
+      // Duplicate [data-view] triggers are TOLERATED for views (warn, don't fail).
+      // A responsive page naturally repeats a nav link in the desktop bar, the mobile
+      // menu, and the footer — which the generation prompt's own RESPONSIVE REQUIREMENT
+      // encourages — so "exactly one trigger per view" is routinely violated and used to
+      // abort the entire run ("No views captured"). Duplicates were never a functional
+      // problem: clickTrigger acts on a single element, and now picks the one actually
+      // laid out at this breakpoint.
+      // Invalid (non-kebab) ids are still fatal. States keep the strict check.
+      if (duplicateViewIds.has(id)) {
+        console.warn(`warn: duplicate [data-view="${id}"] triggers; using the first visible one`);
+      }
+      const err = idError("view", id, new Set());
       if (err) {
         results.push({ id, breakpoint: bp, error: err });
         pushStateErrors(id, bp, `owning view '${id}' not captured: ${err}`);
