@@ -37,6 +37,33 @@ def test_resume_fresh_mutually_exclusive():
     print("✅")
 
 
+def test_reference_parsing_and_resume_conflict():
+    print("  test_reference_parsing_and_resume_conflict...", end=" ")
+    assert parse_args([]).reference is None
+    assert parse_args(["--reference", "shot.png"]).reference == "shot.png"
+    assert parse_args(["--reference", "https://example.com"]).reference == "https://example.com"
+    try:
+        parse_args(["--reference", "shot.png", "--resume"])
+        assert False, "Should have raised SystemExit"
+    except SystemExit:
+        pass
+    print("✅")
+
+
+def test_reference_skips_resume_prompt():
+    print("  test_reference_skips_resume_prompt...", end=" ")
+    rs = RunState(Path(tempfile.mkdtemp()) / "run_state")
+    rs.save_run({"intent": "seeded", "iteration": 2, "max_iterations": 5, "finished": False})
+
+    def refuse(_q):
+        raise AssertionError("the resume prompt must not appear when --reference is given")
+
+    assert decide_resume(parse_args(["--reference", "https://example.com"]), rs, ask=refuse) is False
+    # The unfinished state is left intact — only --fresh clears it.
+    assert rs.has_unfinished() is True
+    print("✅")
+
+
 def test_decide_resume():
     print("  test_decide_resume...", end=" ")
     rs = RunState(Path(tempfile.mkdtemp()) / "run_state")
@@ -66,4 +93,6 @@ if __name__ == "__main__":
     test_parse_defaults()
     test_resume_fresh_mutually_exclusive()
     test_decide_resume()
+    test_reference_parsing_and_resume_conflict()
+    test_reference_skips_resume_prompt()
     print("\nAll tests passed ✅")

@@ -20,16 +20,33 @@ def parse_args(argv=None):
     p.add_argument("intent", nargs="?", default=None, help="design intent (omit to enter it in the web shell)")
     p.add_argument("--max-iterations", type=int, default=config.MAX_ITERATIONS, help=f"iteration budget (default {config.MAX_ITERATIONS})")
     p.add_argument("--port", type=int, default=config.DEFAULT_PORT, help=f"base port; hunts base..base+100 (default {config.DEFAULT_PORT})")
+    p.add_argument(
+        "--reference",
+        default=None,
+        metavar="PATH_OR_URL",
+        help="seed the theme and first draft from a screenshot or a live URL (fresh runs only)",
+    )
     g = p.add_mutually_exclusive_group()
     g.add_argument("--resume", action="store_true", help="resume an unfinished run without prompting")
     g.add_argument("--fresh", action="store_true", help="discard any unfinished run state")
-    return p.parse_args(argv)
+    args = p.parse_args(argv)
+    # Seeding runs only in the fresh branch of run(), so a resumed run can never
+    # consume a reference. Reject the combination rather than silently ignore it.
+    if args.reference and args.resume:
+        p.error("--reference cannot be combined with --resume (seeding only happens on a fresh run)")
+    return args
 
 
 def decide_resume(args, run_state: RunState, ask=input) -> bool:
     """Startup decision: resume, or start fresh (clearing happens in run())."""
     if args.fresh:
         run_state.clear()
+        return False
+    if getattr(args, "reference", None):
+        # --resume is already rejected at parse time; this covers the interactive
+        # path, where answering "yes" would silently discard the reference.
+        if run_state.has_unfinished():
+            print("Starting fresh: --reference cannot seed a resumed run.")
         return False
     if args.resume:
         if run_state.has_unfinished():
