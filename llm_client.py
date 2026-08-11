@@ -452,6 +452,74 @@ def check_model_liveness(provider: dict, model_id: str, attempts: int = 3, timeo
     return ("inconclusive", f"no liveness probe available for provider '{pid}'")
 
 
+VISION_PROBE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "vision_probe.png")
+VISION_PROBE_ANSWER = "738"
+VISION_PROBE_PROMPT = "What three-digit number is shown in this image? Reply with the digits only."
+
+
+def probe_vision(provider: dict, model_id: str, timeout: int = 60) -> Tuple[bool, str]:
+    """Ask ``(provider, model_id)`` to read the committed probe image.
+
+    Returns ``(can_see, detail)`` and never raises. A transport or HTTP failure counts
+    as "cannot see": that is exactly how the OpenAI-compatible dialects report the
+    condition (OpenAI 400s, llama.cpp 500s), and a run whose reference is unusable must
+    stop either way. Only Ollama fails silently, which is why the probe exists at all.
+
+    Calls the transport directly rather than ``call_llm`` — the fallback chain there
+    could let the probe pass on a different provider than the seed calls later use.
+    """
+    try:
+        with open(VISION_PROBE_PATH, "rb") as f:
+            image_b64 = base64.b64encode(f.read()).decode("utf-8")
+    except OSError as e:
+        return (False, f"vision probe image missing: {e}")
+    messages = _build_messages(provider, VISION_PROBE_PROMPT, None, image_b64)
+    try:
+        # retries=1: a blind Ollama model can surface as an in-stream error normalized
+        # to ConnectionError, and the default 3 retries would spend 90s of backoff to
+        # learn nothing.
+        reply = _do_api_call(provider, messages, model_id, timeout=timeout, retries=1)
+    except Exception as e:
+        return (False, f"probe call failed: {str(e)[:120]}")
+    digits = "".join(ch for ch in reply if ch.isdigit())
+    if VISION_PROBE_ANSWER in digits:
+        return (True, "")
+    return (False, f"answered '{reply.strip()[:40]}' instead of {VISION_PROBE_ANSWER}")
+
+
+def preflight_vision(provider_config: ProviderConfig, role: str = "brain") -> Tuple[bool, str]:
+    """Confirm EVERY candidate in *role*'s chain can actually see an image.
+
+    Every candidate, not just the primary: ``call_llm`` falls through to
+    ``fallbackOrder`` (and then to the legacy env provider) on any exception, so a
+    transient error during a seed call could otherwise reroute the image-bearing
+    request to a blind model — the silent-ignore failure this check exists to prevent.
+
+    Unlike ``check_model_liveness``, this does probe cloud providers. A silently
+    ignored reference costs a whole run, which is worth far more than one small call.
+    """
+    role_cfg = provider_config.get_role(role)
+    candidate_ids = [role_cfg["providerId"]] + role_cfg.get("fallbackOrder", [])
+    checked = 0
+    for pid in candidate_ids:
+        try:
+            provider = provider_config.resolve(pid)
+            model_id = provider_config.get_model_id(provider)
+        except (KeyError, FileNotFoundError):
+            continue  # unresolvable id; call_llm would use the legacy env provider
+        ok, detail = probe_vision(provider, model_id)
+        checked += 1
+        if not ok:
+            return (
+                False,
+                f"{role} model '{model_id}' (provider '{pid}') cannot see images — "
+                f"the reference would be silently ignored ({detail})",
+            )
+    if checked == 0:
+        return (False, f"no resolvable provider for role '{role}' to probe for vision support")
+    return (True, "")
+
+
 def preflight_roles(provider_config: ProviderConfig, roles: Tuple[str, ...] = ("brain", "eyes")) -> Tuple[bool, str]:
     """Confirm each role has a usable model before a run does any generation.
 
