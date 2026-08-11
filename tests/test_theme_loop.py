@@ -203,9 +203,43 @@ def test_reference_paragraphs_and_image_threaded():
     print("✅")
 
 
+def test_unparseable_theme_falls_back_without_a_reference():
+    print("  test_unparseable_theme_falls_back_without_a_reference...", end=" ")
+    loop = FrontendDesignLoop("a coffee shop")
+
+    original = llm_client.call_llm
+    llm_client.call_llm = lambda *a, **kw: "not json at all"
+    try:
+        loop.generate_theme()  # must NOT raise
+    finally:
+        llm_client.call_llm = original
+
+    assert loop.theme_json["hard_tokens"]["brand_primary"] == "#000000"
+    print("✅")
+
+
+def test_unparseable_theme_aborts_with_a_reference():
+    print("  test_unparseable_theme_aborts_with_a_reference...", end=" ")
+    loop = FrontendDesignLoop("a coffee shop")
+    loop.reference_png = "/tmp/reference_1.png"
+
+    original = llm_client.call_llm
+    llm_client.call_llm = lambda *a, **kw: "not json at all"
+    try:
+        loop.generate_theme()
+        assert False, "expected an abort on an image-seeded run"
+    except Exception as e:
+        assert "generic palette" in str(e)
+    finally:
+        llm_client.call_llm = original
+    print("✅")
+
+
 if __name__ == "__main__":
     test_theme_validation_loop()
     test_theme_gate_like_for_like_baseline_and_no_status_write()
     test_model_label_guards_unresolvable_provider()
     test_reference_paragraphs_absent_without_a_reference()
     test_reference_paragraphs_and_image_threaded()
+    test_unparseable_theme_falls_back_without_a_reference()
+    test_unparseable_theme_aborts_with_a_reference()

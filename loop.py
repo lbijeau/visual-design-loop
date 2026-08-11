@@ -412,6 +412,11 @@ class FrontendDesignLoop:
                 json.dump(self.theme_json, f, indent=2)
             print(f"✅ Theme saved to {config.THEME_PATH}")
         except json.JSONDecodeError as e:
+            if self.reference_png:
+                raise Exception(
+                    f"theme JSON unparseable ({e}) — refusing to fall back to a generic palette "
+                    "on an image-seeded run, which would put a generic palette on a reference-shaped layout"
+                )
             print(f"❌ Failed to parse theme JSON: {e}")
             self.theme_json = {
                 "hard_tokens": {"brand_primary": "#000000", "brand_secondary": "#ffffff", "primary_font": "sans-serif"},
@@ -1197,6 +1202,10 @@ class FrontendDesignLoop:
             try:
                 self.generate_theme()
             except Exception as e:
+                if self.reference:
+                    print(f"\n❌ Theme generation failed on an image-seeded run: {e}")
+                    print("   The reference cannot be honoured without tokens derived from it. Exiting.")
+                    return
                 print(f"⚠️ Theme generation failed: {e}. Proceeding without design tokens.")
                 self.theme_json = {}
             self.run_state.save_run(self._run_meta())
