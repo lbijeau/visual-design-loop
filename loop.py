@@ -352,8 +352,15 @@ class FrontendDesignLoop:
 
     def generate_theme(self):
         print("\n[0/4] Generating design theme...")
+        reference_block = ""
+        if self.reference_png:
+            reference_block = """
+        REFERENCE IMAGE: The attached image is a design reference. Derive the tokens from the colors and typography actually present in it — sample its real palette instead of inventing one.
+        You cannot identify a typeface from a screenshot. classify it instead ("geometric sans", "humanist sans", "transitional serif", "slab serif", "monospace") and set primary_font to the closest widely-available web font for that classification.
+        """
         prompt = f"""
         Create a professional design theme for a website with the following intent: {self.intent}.
+        {reference_block}
 
         Return ONLY a JSON object with the following structure:
         {{
@@ -390,7 +397,13 @@ class FrontendDesignLoop:
 
         Ensure colors are high-contrast and professional. Do not include any markdown blocks.
         """
-        theme_str = llm_client.call_llm("brain", prompt, system_prompt=THEME_SYSTEM_PROMPT, provider_config=self.provider_config)
+        theme_str = llm_client.call_llm(
+            "brain",
+            prompt,
+            system_prompt=THEME_SYSTEM_PROMPT,
+            image_path=self.reference_png,
+            provider_config=self.provider_config,
+        )
         theme_str = theme_str.replace("```json", "").replace("```", "").strip()
 
         try:
@@ -463,8 +476,15 @@ class FrontendDesignLoop:
         You MUST use these tokens for all colors, fonts, and spacing.
         Do not use any arbitrary hex colors or spacing values.
         """
+        structural_reference = ""
+        if self.reference_png:
+            structural_reference = """
+        STRUCTURAL REFERENCE: The attached image is a layout reference. Follow its visual hierarchy, section order, information density and component vocabulary. The INTENT alone decides what content exists — do not copy text, logos, imagery or subject matter from the reference.
+        Where colors in the reference disagree with the MANDATORY DESIGN TOKENS above, the tokens win. Never sample a hex value out of the image.
+        """
         prompt = f"""
         {theme_context}
+        {structural_reference}
 
         MULTI-VIEW CONVENTION: If the design needs multiple views/screens (e.g. an app with sidebar navigation), keep everything in this single file with ALL views' full content present in the static markup. Tag each navigation trigger with data-view="<kebab-id>" and its content container with data-view-panel="<same-id>". Hide inactive panels with the hidden attribute and toggle visibility on click with a few lines of inline JavaScript. Each view id must name exactly ONE data-view-panel, and every data-view-panel must have at least one matching data-view trigger. A view may be reached from several triggers (the same link in the desktop nav, the mobile menu and the footer) — that is fine; two different screens sharing one id is not. Do not build panel content at runtime and do not add utility classes from JavaScript. Single-view pages must not use these attributes.
 
@@ -479,7 +499,12 @@ class FrontendDesignLoop:
         Output ONLY the complete HTML file content. Do not include markdown blocks.
         """
         self.current_code = llm_client.call_llm(
-            "brain", prompt, system_prompt=BRAIN_SYSTEM_PROMPT, timeout=FULL_FILE_TIMEOUT, provider_config=self.provider_config
+            "brain",
+            prompt,
+            system_prompt=BRAIN_SYSTEM_PROMPT,
+            image_path=self.reference_png,
+            timeout=FULL_FILE_TIMEOUT,
+            provider_config=self.provider_config,
         )
         self.current_code = self.current_code.replace("```html", "").replace("```", "").strip()
 
