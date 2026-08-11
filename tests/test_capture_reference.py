@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import zlib
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
@@ -115,9 +116,74 @@ def test_unreachable_url_exits_nonzero():
     print("✅")
 
 
+def make_png(path, width, height, rgb=(200, 30, 30)):
+    """Write a solid-color truecolor PNG without Pillow."""
+    raw = b"".join(b"\x00" + bytes(rgb) * width for _ in range(height))
+
+    def chunk(tag, data):
+        body = tag + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)  # 8-bit, color type 2 (RGB)
+    png = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr) + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b"")
+    with open(path, "wb") as f:
+        f.write(png)
+
+
+def test_large_image_is_scaled_down():
+    print("  test_large_image_is_scaled_down...", end=" ")
+    if not chromium_available():
+        print("SKIPPED (node/playwright not available)")
+        return
+    d = tempfile.mkdtemp()
+    src, out = os.path.join(d, "big.png"), os.path.join(d, "out.png")
+    make_png(src, 2560, 1400)
+    result = _run(src, out)
+    assert result.returncode == 0, f"capture failed: {result.stderr}"
+    w, h = png_size(out)
+    assert w == 1280, f"expected downscale to 1280, got {w}"
+    assert h <= 2400
+    print("✅")
+
+
+def test_small_image_is_not_upscaled():
+    print("  test_small_image_is_not_upscaled...", end=" ")
+    if not chromium_available():
+        print("SKIPPED (node/playwright not available)")
+        return
+    d = tempfile.mkdtemp()
+    src, out = os.path.join(d, "small.png"), os.path.join(d, "out.png")
+    make_png(src, 400, 300)
+    result = _run(src, out)
+    assert result.returncode == 0, f"capture failed: {result.stderr}"
+    w, h = png_size(out)
+    # The canvas stays 1280 wide; what must not happen is the 400px image being
+    # stretched across it and blurred. The shot is 1280 wide but the image within
+    # it keeps its own height, so a scaled copy would be 300 * (1280/400) = 960 tall.
+    assert h < 900, f"400px-wide image appears upscaled (height {h})"
+    print("✅")
+
+
+def test_undecodable_file_exits_nonzero():
+    print("  test_undecodable_file_exits_nonzero...", end=" ")
+    if not chromium_available():
+        print("SKIPPED (node/playwright not available)")
+        return
+    d = tempfile.mkdtemp()
+    src, out = os.path.join(d, "junk.png"), os.path.join(d, "out.png")
+    with open(src, "wb") as f:
+        f.write(b"not an image at all")
+    result = _run(src, out)
+    assert result.returncode != 0, "an undecodable file must fail loudly"
+    print("✅")
+
+
 if __name__ == "__main__":
     print("\n=== Capture Reference Tests ===")
     test_url_capture_is_1280_wide()
     test_tall_page_is_clamped()
     test_unreachable_url_exits_nonzero()
+    test_large_image_is_scaled_down()
+    test_small_image_is_not_upscaled()
+    test_undecodable_file_exits_nonzero()
     print("\nAll tests passed ✅")

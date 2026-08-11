@@ -1,4 +1,8 @@
 const { chromium } = require("playwright");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+const { pathToFileURL } = require("url");
 
 // Matches capture.js's desktop breakpoint, so the reference is read at the same
 // width the generated page will first be judged at.
@@ -19,10 +23,41 @@ async function shootUrl(page, url) {
   await page.waitForTimeout(SETTLE_MS);
 }
 
-async function capture(source, outPath) {
-  if (!/^https?:\/\//i.test(source)) {
-    throw new Error(`expected an http(s) URL, got: ${source}`);
+// Not page.goto("file://…png"): that renders Chromium's image document, which
+// centers the image on a theme-dependent letterbox, flattens transparency onto
+// it, and would feed that letterbox to palette extraction. The shim fixes the
+// background, and max-width:100% scales a large image down while leaving a small
+// one at its own size rather than upscaling it into blur.
+async function shootImage(page, filePath) {
+  const href = pathToFileURL(path.resolve(filePath)).href;
+  // setContent creates an about:blank/data page whose origin blocks file://
+  // subresources, so the image would never load. Write the shim to a temp file
+  // and navigate to it: a file:// page may load file:// images.
+  const shim = path.join(os.tmpdir(), `ref-shim-${Date.now()}.html`);
+  fs.writeFileSync(
+    shim,
+    `<!doctype html><html><body style="margin:0;background:#ffffff">` +
+      `<img id="ref" src="${href}" style="display:block;max-width:100%;height:auto">` +
+      `</body></html>`,
+  );
+  try {
+    await page.goto(pathToFileURL(shim).href);
+    await page.waitForFunction(
+      () => {
+        const img = document.getElementById("ref");
+        return img && img.complete && img.naturalWidth > 0;
+      },
+      null,
+      { timeout: 15000 },
+    );
+  } catch (err) {
+    throw new Error(`could not decode image: ${filePath}`);
+  } finally {
+    fs.unlinkSync(shim);
   }
+}
+
+async function capture(source, outPath) {
   const browser = await chromium.launch();
   try {
     const context = await browser.newContext({
@@ -30,7 +65,11 @@ async function capture(source, outPath) {
       deviceScaleFactor: 1,
     });
     const page = await context.newPage();
-    await shootUrl(page, source);
+    if (/^https?:\/\//i.test(source)) {
+      await shootUrl(page, source);
+    } else {
+      await shootImage(page, source);
+    }
     const full = await page.evaluate(() => document.documentElement.scrollHeight);
     const height = Math.max(1, Math.min(full, MAX_HEIGHT));
     await page.screenshot({ path: outPath, fullPage: true, clip: { x: 0, y: 0, width: WIDTH, height } });
