@@ -244,21 +244,131 @@ function show(id) {
 </body></html>"""
 
 
-def test_duplicate_view_triggers_error_record():
-    print("  test_duplicate_view_triggers_error_record...", end=" ")
+COLLIDING_PANELS_PAGE = """<html><head><title>t</title>
+<script>
+function show(id) {
+  document.querySelectorAll('[data-view-panel]').forEach(p => p.hidden = true);
+  document.querySelector('[data-view-panel="' + id + '"]').hidden = false;
+}
+</script></head><body>
+<nav>
+  <a data-view="dashboard" href="#" onclick="show('dashboard')">Dashboard</a>
+  <a data-view="settings" href="#" onclick="show('settings')">Settings</a>
+</nav>
+<section data-view-panel="dashboard"><h1>DASH</h1></section>
+<section data-view-panel="settings" hidden><h1>SET ONE</h1></section>
+<section data-view-panel="settings" hidden><h1>SET TWO</h1></section>
+</body></html>"""
+# two screens claiming one id -> only the first is reachable
+
+ORPHAN_PANEL_PAGE = """<html><head><title>t</title>
+<script>
+function show(id) {
+  document.querySelectorAll('[data-view-panel]').forEach(p => p.hidden = true);
+  document.querySelector('[data-view-panel="' + id + '"]').hidden = false;
+}
+</script></head><body>
+<nav>
+  <a data-view="dashboard" href="#" onclick="show('dashboard')">Dashboard</a>
+  <a data-view="dashboard" href="#" onclick="show('dashboard')">Settings</a>
+</nav>
+<section data-view-panel="dashboard"><h1>DASH</h1></section>
+<section data-view-panel="settings" hidden><h1>SET</h1></section>
+</body></html>"""
+# the second nav link should have said 'settings' -> that screen has no trigger
+
+OFFCANVAS_DRAWER_PAGE = """<html><head><title>t</title>
+<style>#drawer { position: fixed; top: 0; left: 0; width: 240px; height: 100%; transform: translateX(-100%); }</style>
+<script>
+function show(id) {
+  document.querySelectorAll('[data-view-panel]').forEach(p => p.hidden = true);
+  document.querySelector('[data-view-panel="' + id + '"]').hidden = false;
+}
+</script></head><body>
+<div id="drawer"><a data-view="settings" href="#" onclick="void(0)">Settings (drawer copy)</a></div>
+<nav>
+  <a data-view="dashboard" href="#" onclick="show('dashboard')">Dashboard</a>
+  <a data-view="settings" href="#" onclick="show('settings')">Settings</a>
+</nav>
+<section data-view-panel="dashboard"><h1>DASH</h1></section>
+<section data-view-panel="settings" hidden><h1>SET</h1></section>
+</body></html>"""
+# the drawer copy is earlier in the DOM and has a non-zero rect, but is off-canvas
+# and inert; picking it would leave the panel hidden
+
+
+def test_duplicate_view_triggers_tolerated():
+    """A view reachable from several nav copies is normal on a responsive page:
+    warn once, capture it, do not abort the run."""
+    print("  test_duplicate_view_triggers_tolerated...", end=" ")
     if not chromium_available():
         print("SKIPPED (node/playwright not available)")
         return
-    result = _run_capture_bp(DUPLICATE_VIEW_PAGE, '[["desktop", [1280, 800]]]')
+    result = _run_capture_bp(DUPLICATE_VIEW_PAGE, BP_ARG)
     assert result.returncode == 0, f"capture failed: {result.stderr}"
     records = json.loads(result.stdout.strip().splitlines()[-1])["views"]
     dash = [r for r in records if r["id"] == "dashboard" and not r.get("pseudo")]
-    assert len(dash) == 1, f"expected ONE base record for the duplicated view: {dash}"
-    assert "duplicate view id" in dash[0]["error"]
-    assert "screenshot" not in dash[0]
-    # The well-formed view on the same page still captures normally:
+    assert len(dash) == 2, f"expected ONE base record per breakpoint: {dash}"
+    for r in dash:
+        assert "error" not in r, f"duplicate triggers still fatal: {r}"
+        assert os.path.exists(r["screenshot"])
+    assert result.stderr.count("has 2 [data-view] triggers") == 1, f"warned per breakpoint: {result.stderr}"
     sett = [r for r in records if r["id"] == "settings" and not r.get("pseudo")]
-    assert len(sett) == 1 and os.path.exists(sett[0]["screenshot"])
+    assert len(sett) == 2 and all(os.path.exists(r["screenshot"]) for r in sett)
+    print("✅")
+
+
+def test_colliding_view_panels_error_record():
+    """Duplicate PANELS are an id collision, not a repeated nav link: the second
+    screen is unreachable, so it must stay fatal rather than vanish."""
+    print("  test_colliding_view_panels_error_record...", end=" ")
+    if not chromium_available():
+        print("SKIPPED (node/playwright not available)")
+        return
+    result = _run_capture_bp(COLLIDING_PANELS_PAGE, '[["desktop", [1280, 800]]]')
+    assert result.returncode == 0, f"capture failed: {result.stderr}"
+    records = json.loads(result.stdout.strip().splitlines()[-1])["views"]
+    sett = [r for r in records if r["id"] == "settings" and not r.get("pseudo")]
+    assert len(sett) == 1, f"expected ONE base record for the collided id: {sett}"
+    assert "duplicate view id" in sett[0]["error"]
+    assert "screenshot" not in sett[0]
+    # The well-formed view on the same page still captures normally:
+    dash = [r for r in records if r["id"] == "dashboard" and not r.get("pseudo")]
+    assert len(dash) == 1 and os.path.exists(dash[0]["screenshot"])
+    print("✅")
+
+
+def test_orphan_view_panel_error_record():
+    """A panel no trigger points at would otherwise leave no trace at all — the
+    run would converge having audited half the app."""
+    print("  test_orphan_view_panel_error_record...", end=" ")
+    if not chromium_available():
+        print("SKIPPED (node/playwright not available)")
+        return
+    result = _run_capture_bp(ORPHAN_PANEL_PAGE, '[["desktop", [1280, 800]]]')
+    assert result.returncode == 0, f"capture failed: {result.stderr}"
+    records = json.loads(result.stdout.strip().splitlines()[-1])["views"]
+    sett = [r for r in records if r["id"] == "settings" and not r.get("pseudo")]
+    assert len(sett) == 1, f"unreachable screen left no record: {records}"
+    assert "no [data-view] trigger" in sett[0]["error"]
+    dash = [r for r in records if r["id"] == "dashboard" and not r.get("pseudo")]
+    assert len(dash) == 1 and os.path.exists(dash[0]["screenshot"])
+    print("✅")
+
+
+def test_offcanvas_duplicate_trigger_not_preferred():
+    """An off-canvas drawer copy reports a non-zero rect but is not rendered at
+    this breakpoint — the real nav link must win despite being later in the DOM."""
+    print("  test_offcanvas_duplicate_trigger_not_preferred...", end=" ")
+    if not chromium_available():
+        print("SKIPPED (node/playwright not available)")
+        return
+    result = _run_capture_bp(OFFCANVAS_DRAWER_PAGE, '[["desktop", [1280, 800]]]')
+    assert result.returncode == 0, f"capture failed: {result.stderr}"
+    records = json.loads(result.stdout.strip().splitlines()[-1])["views"]
+    sett = [r for r in records if r["id"] == "settings" and not r.get("pseudo") and not r.get("state")]
+    assert len(sett) == 1 and "screenshot" in sett[0], f"clicked the off-canvas copy: {sett}"
+    assert os.path.exists(sett[0]["screenshot"])
     print("✅")
 
 
@@ -297,7 +407,7 @@ def test_duplicate_state_triggers_error_record():
     print("✅")
 
 
-DUP_VIEW_WITH_STATE_PAGE = """<html><head><title>t</title>
+BAD_VIEW_WITH_STATE_PAGE = """<html><head><title>t</title>
 <script>
 function show(id) {
   document.querySelectorAll('[data-view-panel]').forEach(p => p.hidden = true);
@@ -305,11 +415,10 @@ function show(id) {
 }
 </script></head><body>
 <nav>
-  <a data-view="view-a" href="#" onclick="show('view-a')">A</a>
-  <a data-view="view-a" href="#" onclick="show('view-a')">A again</a>
+  <a data-view="View A" href="#">A</a>
   <a data-view="view-b" href="#" onclick="show('view-b')">B</a>
 </nav>
-<section data-view-panel="view-a">
+<section data-view-panel="View A">
   <button data-state="help-modal"
     onclick="const p=document.querySelector('[data-state-panel=help-modal]'); p.hidden=!p.hidden">
     Help</button>
@@ -317,6 +426,7 @@ function show(id) {
 <section data-view-panel="view-b" hidden><h1>B</h1></section>
 <div data-state-panel="help-modal" hidden><h2>HELP</h2></div>
 </body></html>"""
+# 'View A' is not lowercase-kebab -> still fatal, and it owns a state
 
 
 def test_errored_view_reports_owned_states():
@@ -326,12 +436,12 @@ def test_errored_view_reports_owned_states():
     if not chromium_available():
         print("SKIPPED (node/playwright not available)")
         return
-    result = _run_capture_bp(DUP_VIEW_WITH_STATE_PAGE, '[["desktop", [1280, 800]]]')
+    result = _run_capture_bp(BAD_VIEW_WITH_STATE_PAGE, '[["desktop", [1280, 800]]]')
     assert result.returncode == 0, f"capture failed: {result.stderr}"
     records = json.loads(result.stdout.strip().splitlines()[-1])["views"]
     by_key = {(r["id"], r.get("state")): r for r in records if not r.get("pseudo")}
-    assert "duplicate view id" in by_key[("view-a", None)]["error"]
-    helper = by_key.get(("view-a", "help-modal"))
+    assert "invalid view id" in by_key[("View A", None)]["error"]
+    helper = by_key.get(("View A", "help-modal"))
     assert helper is not None, f"owned state vanished: {records}"
     assert "owning view" in helper["error"]
     assert "screenshot" in by_key[("view-b", None)]  # rest of the page fine
@@ -458,8 +568,8 @@ def test_errored_view_reports_sheets():
     if not chromium_available():
         print("SKIPPED (node/playwright not available)")
         return
-    records = _sheet_records(DUP_VIEW_WITH_STATE_PAGE)
-    errs = [r for r in records if r.get("pseudo") and r["id"] == "view-a"]
+    records = _sheet_records(BAD_VIEW_WITH_STATE_PAGE)
+    errs = [r for r in records if r.get("pseudo") and r["id"] == "View A"]
     assert {r["pseudo"] for r in errs} == {"hover", "focus"}, f"sheet errors missing: {records}"
     assert all("owning view" in r["error"] for r in errs)
     good = [r for r in records if r.get("pseudo") and r["id"] == "view-b"]
@@ -629,7 +739,10 @@ if __name__ == "__main__":
     test_broken_toggle_reload_fallback()
     test_state_ownership_scopes_to_view()
     test_duplicate_state_triggers_error_record()
-    test_duplicate_view_triggers_error_record()
+    test_duplicate_view_triggers_tolerated()
+    test_colliding_view_panels_error_record()
+    test_orphan_view_panel_error_record()
+    test_offcanvas_duplicate_trigger_not_preferred()
     test_errored_view_reports_owned_states()
     test_viewport_failure_reports_states()
     test_stateless_pages_add_no_records()

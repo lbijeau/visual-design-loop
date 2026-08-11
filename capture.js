@@ -5,11 +5,12 @@ async function capture(filePath) {
   const browser = await chromium.launch();
   const context = await browser.newContext({
     viewport: { width: 1280, height: 800 },
-    // 1, not 2: these screenshots are consumed by the vision auditor, not by a human.
+    // 1, not 2: the vision auditor is the cost-driving consumer of these screenshots.
     // At 2x a 1280px layout is sent as a 2880x1800 image = 4608 image tokens and ~47 s
     // of prefill per audit cell; at 1x it is 1608 tokens and ~9.7 s (measured 2026-08-09,
     // Qwen3.6-35B-A3B + mmproj). The CSS geometry is identical — only Retina pixel
-    // density is discarded. capture_shell.js stays at 2x for the human-facing preview.
+    // density is discarded. report.py embeds these same PNGs in the human-facing report,
+    // so that report is now 1x too; capture_shell.js stays at 2x for the showcase shots.
     deviceScaleFactor: 1,
   });
   const page = await context.newPage();
@@ -58,7 +59,9 @@ async function capture(filePath) {
       overlay.style.pointerEvents = "none";
       overlay.style.zIndex = "2147483647";
       overlay.style.color = "red";
-      overlay.style.fontSize = "12px";
+      // 16, not 12: at deviceScaleFactor 1 a label is only as many device pixels as CSS
+      // pixels, and visual_audit.py asks the model to cite these sectors by name.
+      overlay.style.fontSize = "16px";
       overlay.style.fontFamily = "monospace";
       overlay.style.fontWeight = "bold";
 
@@ -93,6 +96,9 @@ async function capture(filePath) {
   const viewIds = await page.evaluate(() =>
     Array.from(document.querySelectorAll("[data-view]")).map((el) => el.getAttribute("data-view")),
   );
+  const viewPanelIds = await page.evaluate(() =>
+    Array.from(document.querySelectorAll("[data-view-panel]")).map((el) => el.getAttribute("data-view-panel")),
+  );
 
   // 4. Discover declared UI states (modals, drawers) and their view ownership.
   const states = await page.evaluate(() =>
@@ -103,6 +109,16 @@ async function capture(filePath) {
   );
   const defaultView = viewIds.length ? viewIds[0] : "default";
   const duplicateViewIds = new Set(viewIds.filter((id, i) => viewIds.indexOf(id) !== i));
+  // A repeated [data-view] TRIGGER is benign (same nav link in the desktop bar and the
+  // mobile menu). A repeated [data-view-PANEL] is an id collision: two different screens
+  // claim one id, and only the first is ever reachable via querySelector — so the second
+  // would be silently dropped from the audit. That stays fatal.
+  const collidingViewIds = new Set(viewPanelIds.filter((id, i) => viewPanelIds.indexOf(id) !== i));
+  // A panel no trigger points at is a screen the audit would never see — the shape a
+  // mistyped nav link takes once duplicate triggers are tolerated.
+  const orphanPanelIds = viewIds.length
+    ? Array.from(new Set(viewPanelIds.filter((id) => !viewIds.includes(id))))
+    : [];
   const duplicateStateIds = new Set(states.map((s) => s.id).filter((id, i, ids) => ids.indexOf(id) !== i));
 
   const bpSlug = (bp) => String(bp).replace(/_/g, "-");
@@ -326,14 +342,24 @@ async function capture(filePath) {
       ([k, i]) => {
         const all = Array.from(document.querySelectorAll(`[data-${k}="${i}"]`));
         if (!all.length) throw new Error(`no [data-${k}] trigger found`);
-        // With duplicates (desktop nav + mobile menu + footer), prefer a trigger that is
-        // actually laid out at this breakpoint; fall back to the first in DOM order so
-        // behaviour is unchanged for the single-trigger case.
-        const visible = all.find((el) => {
+        // With duplicates (desktop nav + mobile menu + footer), prefer a trigger actually
+        // rendered at this breakpoint. A bare rect test is not enough: visibility:hidden,
+        // opacity:0 and an off-canvas drawer (transform: translateX(-100%)) all report a
+        // non-zero rect, and such a copy usually sits EARLIER in the DOM than the real
+        // control. Falls back to DOM order, so the single-trigger case — including a
+        // display:none hamburger link — behaves exactly as before.
+        const rendered = all.find((el) => {
           const r = el.getBoundingClientRect();
-          return r.width > 0 && r.height > 0;
+          if (r.width <= 0 || r.height <= 0) return false;
+          if (r.right <= 0 || r.bottom <= 0 || r.left >= innerWidth || r.top >= innerHeight) return false;
+          for (let n = el; n && n.nodeType === 1; n = n.parentElement) {
+            const cs = getComputedStyle(n);
+            if (cs.visibility === "hidden" || cs.visibility === "collapse") return false;
+            if (parseFloat(cs.opacity) === 0) return false; // opacity does not inherit — walk up
+          }
+          return true;
         });
-        (visible || all[0]).click();
+        (rendered || all[0]).click();
       },
       [kind, id],
     );
@@ -352,9 +378,10 @@ async function capture(filePath) {
     );
   }
 
-  function idError(kind, id, dupSet) {
+  // dupReason differs by kind: states collide on their triggers, views on their panels.
+  function idError(kind, id, dupSet, dupReason) {
     if (!/^[a-z0-9-]+$/.test(id)) return `invalid ${kind} id (must be lowercase-kebab)`;
-    if (dupSet.has(id)) return `duplicate ${kind} id (multiple [data-${kind}] triggers share it)`;
+    if (dupSet.has(id)) return dupReason;
     return null;
   }
 
@@ -375,7 +402,12 @@ async function capture(filePath) {
 
   async function captureStates(view, bp) {
     for (const st of ownedStates(view)) {
-      const err = idError("state", st.id, duplicateStateIds);
+      const err = idError(
+        "state",
+        st.id,
+        duplicateStateIds,
+        "duplicate state id (multiple [data-state] triggers share it)",
+      );
       if (err) {
         results.push({ id: view, breakpoint: bp, state: st.id, error: err });
         continue;
@@ -425,6 +457,8 @@ async function capture(filePath) {
     }
   }
 
+  const warnedDuplicates = new Set(); // warn once per id, not once per breakpoint
+
   for (const [bp, [width, height]] of breakpoints) {
     try {
       await page.setViewportSize({ width, height });
@@ -432,7 +466,7 @@ async function capture(filePath) {
       // and fonts/Play-CDN observer work may lag the synchronous reflow.
       await page.waitForTimeout(300);
     } catch (err) {
-      const ids = viewIds.length ? Array.from(new Set(viewIds)) : ["default"];
+      const ids = viewIds.length ? Array.from(new Set([...viewIds, ...orphanPanelIds])) : ["default"];
       for (const id of ids) {
         const reason = `viewport failed: ${String(err).slice(0, 150)}`;
         results.push({ id, breakpoint: bp, error: reason });
@@ -452,18 +486,24 @@ async function capture(filePath) {
     for (const id of viewIds) {
       if (seenViews.has(id)) continue; // one record per id per bp
       seenViews.add(id);
-      // Duplicate [data-view] triggers are TOLERATED for views (warn, don't fail).
-      // A responsive page naturally repeats a nav link in the desktop bar, the mobile
-      // menu, and the footer — which the generation prompt's own RESPONSIVE REQUIREMENT
-      // encourages — so "exactly one trigger per view" is routinely violated and used to
-      // abort the entire run ("No views captured"). Duplicates were never a functional
-      // problem: clickTrigger acts on a single element, and now picks the one actually
-      // laid out at this breakpoint.
-      // Invalid (non-kebab) ids are still fatal. States keep the strict check.
-      if (duplicateViewIds.has(id)) {
-        console.warn(`warn: duplicate [data-view="${id}"] triggers; using the first visible one`);
+      // Duplicate [data-view] TRIGGERS are tolerated (warn, don't fail). A responsive
+      // page naturally repeats a nav link in the desktop bar, the mobile menu and the
+      // footer, so "exactly one trigger per view" was routinely violated and used to
+      // abort the entire run ("No views captured"). It was never a functional problem:
+      // clickTrigger acts on a single element, and now picks the one rendered at this
+      // breakpoint. Colliding PANELS and invalid (non-kebab) ids stay fatal — those do
+      // hide a screen from the audit. States keep the strict single-trigger check.
+      if (duplicateViewIds.has(id) && !collidingViewIds.has(id) && !warnedDuplicates.has(id)) {
+        warnedDuplicates.add(id);
+        const n = viewIds.filter((v) => v === id).length;
+        console.warn(`warn: view '${id}' has ${n} [data-view] triggers; clicking the one rendered at each breakpoint`);
       }
-      const err = idError("view", id, new Set());
+      const err = idError(
+        "view",
+        id,
+        collidingViewIds,
+        "duplicate view id (multiple [data-view-panel] containers share it)",
+      );
       if (err) {
         results.push({ id, breakpoint: bp, error: err });
         pushStateErrors(id, bp, `owning view '${id}' not captured: ${err}`);
@@ -488,6 +528,14 @@ async function capture(filePath) {
         pushStateErrors(id, bp, `owning view '${id}' not captured: ${String(err2).slice(0, 150)}`);
         pushSheetErrors(id, bp, `owning view '${id}' not captured: ${String(err2).slice(0, 150)}`);
       }
+    }
+    // A panel with no matching trigger can never be activated, so it would leave no
+    // trace at all in the results — the run would converge having audited half the app.
+    for (const id of orphanPanelIds) {
+      const reason = `no [data-view] trigger for [data-view-panel="${id}"]`;
+      results.push({ id, breakpoint: bp, error: reason });
+      pushStateErrors(id, bp, reason);
+      pushSheetErrors(id, bp, reason);
     }
   }
 
