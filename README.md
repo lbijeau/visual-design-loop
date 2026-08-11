@@ -93,8 +93,27 @@ Flags:
 | `--max-iterations N` | Iteration budget (default 5) |
 | `--port P` | Base port; hunts `P..P+100` (default 8000) |
 | `--resume` / `--fresh` | Continue or discard an interrupted run (default: prompt) |
+| `--reference PATH_OR_URL` | Seed the theme and first draft from a screenshot or a live URL (fresh runs only) |
 
 An optional `start.sh` launches the orchestrator detached and pushes `providers.json` for you; edit its hard-coded intent before using it.
+
+### Seeding from a reference
+
+Pass a screenshot or a live URL to seed the run's palette and first layout:
+
+```bash
+python3 orchestrator.py "a dog-walking service" --reference ~/Desktop/pricing-page.png
+python3 orchestrator.py "a dog-walking service" --reference https://example.com/pricing
+```
+
+The reference sets the design tokens and the structure of the first draft — hierarchy,
+section order, density — while the intent alone decides what content is on the page. It
+is a starting point, not a target: the audit still scores against the intent, so
+resemblance is expected to fade over successive iterations.
+
+Requires a vision-capable brain model; the run aborts up front if the configured model
+cannot read an image, rather than silently ignoring the reference. `--reference` cannot
+be combined with `--resume`, because seeding only happens on a fresh run.
 
 ---
 
