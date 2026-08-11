@@ -72,7 +72,7 @@ def main():
     resume = decide_resume(args, RunState())
     status = LoopStatus()
     server = LivePreviewServer(status=status, port=args.port)
-    loop = FrontendDesignLoop(args.intent, max_iterations=args.max_iterations, status=status)
+    loop = FrontendDesignLoop(args.intent, max_iterations=args.max_iterations, status=status, reference=args.reference)
     server.start()
     try:
         loop.run(port=server.port, resume=resume)

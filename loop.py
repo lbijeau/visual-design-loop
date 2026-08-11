@@ -281,8 +281,10 @@ class FrontendDesignLoop:
     """The design loop engine.  Manages theme generation, code generation,
     rendering, capture, audit, and refinement."""
 
-    def __init__(self, intent: str = None, max_iterations: int = None, status: LoopStatus = None):
+    def __init__(self, intent: str = None, max_iterations: int = None, status: LoopStatus = None, reference: str = None):
         self.intent = intent
+        self.reference = reference  # raw --reference value: a path or a URL
+        self.reference_png = None  # normalized PNG, set by _acquire_reference
         self.max_iterations = max_iterations or config.MAX_ITERATIONS
         self.status = status or LoopStatus()
         self.current_code = ""
@@ -307,6 +309,26 @@ class FrontendDesignLoop:
             f.write("</html>")
         with open(config.VERSION_PATH, "w") as f:
             f.write("0")
+
+    def _acquire_reference(self):
+        """Normalize --reference into one bounded PNG under screenshots/.
+
+        Raises on every failure path: a reference that was asked for and cannot be
+        used must stop the run, never degrade it to a reference-less design.
+        """
+        config.SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
+        out = config.SCREENSHOT_DIR / f"reference_{int(time.time())}.png"
+        result = subprocess.run(
+            ["node", str(config.REFERENCE_SCRIPT), self.reference, str(out)],
+            capture_output=True,
+            text=True,
+            cwd=str(config.PROJECT_DIR),
+            timeout=180,
+        )
+        if result.returncode != 0 or not out.exists():
+            raise Exception(f"reference capture failed: {result.stderr.strip()[:300]}")
+        self.reference_png = str(out)
+        return self.reference_png
 
     def _get_reload_script(self):
         return """
@@ -714,6 +736,8 @@ class FrontendDesignLoop:
     def _run_meta(self) -> dict:
         return {
             "intent": self.intent,
+            "reference": self.reference,
+            "reference_png": self.reference_png,
             "theme_json": self.theme_json,
             "iteration": self.iteration,
             "undo_pointer": self.undo_pointer,
@@ -1113,6 +1137,22 @@ class FrontendDesignLoop:
                 print(f"\n❌ {detail}")
                 print(f"   Reconfigure the model at http://localhost:{port}/provider_wizard.html?mode=settings and re-run.")
                 return
+
+            # Reference seeding: capture first, then prove the brain can read it.
+            # Both must happen before the intent wait so a failure surfaces at once.
+            if self.reference:
+                print(f"\n🖼️ Capturing design reference: {self.reference}")
+                try:
+                    self._acquire_reference()
+                except Exception as e:
+                    print(f"\n❌ {e}")
+                    return
+                print(f"✅ Reference captured: {self.reference_png}")
+                ok, detail = llm_client.preflight_vision(self.provider_config)
+                if not ok:
+                    print(f"\n❌ {detail}")
+                    print(f"   Choose a vision-capable model at http://localhost:{port}/provider_wizard.html?mode=settings and re-run.")
+                    return
 
             # Intent input (if no CLI arg)
             if not self.intent:

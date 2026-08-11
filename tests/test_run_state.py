@@ -113,6 +113,20 @@ def test_events_missing_file():
     print("✅")
 
 
+def test_reference_survives_repeated_save():
+    print("  test_reference_survives_repeated_save...", end=" ")
+    from loop import FrontendDesignLoop
+
+    loop = FrontendDesignLoop("test intent", reference="https://example.com/x")
+    loop.reference_png = "/tmp/reference_1.png"
+    meta = loop._run_meta()
+    # run.json is rewritten wholesale from _run_meta() at six call sites, so a
+    # one-off save_run would be erased by the next one.
+    assert meta["reference"] == "https://example.com/x"
+    assert meta["reference_png"] == "/tmp/reference_1.png"
+    print("✅")
+
+
 if __name__ == "__main__":
     print("\n=== RunState Tests ===")
     test_no_state()
@@ -123,4 +137,5 @@ if __name__ == "__main__":
     test_events_roundtrip()
     test_events_corrupt_line_skipped()
     test_events_missing_file()
+    test_reference_survives_repeated_save()
     print("\nAll tests passed ✅")
