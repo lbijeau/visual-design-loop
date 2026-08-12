@@ -86,6 +86,17 @@ class LivePreviewServer:
                 if self.path in ("/save-providers", "/test-provider", "/start", "/submit-feedback", "/action"):
                     origin = self.headers.get("Origin", "")
                     if origin and not origin.startswith(("http://localhost:", "http://127.0.0.1:")):
+                        # Consume the request body before replying. Every other branch
+                        # reads it; this one used to return without doing so, leaving
+                        # bytes in the receive buffer, which makes the close emit TCP RST
+                        # instead of FIN — the client then sees ConnectionResetError while
+                        # reading the response instead of the 403 we just wrote.
+                        try:
+                            pending = int(self.headers.get("Content-Length", 0))
+                        except ValueError:
+                            pending = 0
+                        if pending > 0:
+                            self.rfile.read(pending)
                         self.send_response(403)
                         self.send_header("Content-type", "application/json")
                         self.end_headers()

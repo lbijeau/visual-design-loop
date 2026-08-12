@@ -209,6 +209,33 @@ def test_action_unknown_and_bad_json():
     print("✅")
 
 
+def test_origin_rejection_body_is_readable():
+    """Regression: the 403 branch returned without consuming the request body, so
+    the socket close emitted TCP RST instead of FIN and the client hit
+    ConnectionResetError while reading the response it had just been handed.
+
+    Measured at roughly a 50% failure rate per request before the fix, independent
+    of payload size, so ONE request would catch a regression only half the time.
+    Ten make that 999-in-1000, and the loop costs milliseconds."""
+    print("  test_origin_rejection_body_is_readable...", end=" ")
+    server = LivePreviewServer()
+    server.start()
+    try:
+        time.sleep(0.3)
+        for i in range(10):
+            resp = req.post(
+                f"http://localhost:{server.port}/start",
+                json={"intent": "x" * 2000},
+                headers={"Origin": "http://evil.com"},
+                timeout=5,
+            )
+            assert resp.status_code == 403, f"request {i}: got {resp.status_code}"
+            assert resp.json() == {"error": "Forbidden"}, f"request {i}: {resp.text}"
+    finally:
+        server.stop()
+    print("✅")
+
+
 def test_action_and_feedback_origin_rejected():
     print("  test_action_and_feedback_origin_rejected...", end=" ")
     server = LivePreviewServer()
@@ -256,6 +283,7 @@ if __name__ == "__main__":
     test_submit_feedback_ok()
     test_action_endpoint()
     test_action_unknown_and_bad_json()
+    test_origin_rejection_body_is_readable()
     test_action_and_feedback_origin_rejected()
     test_port_parameter_and_hunt()
     print("\nAll tests passed ✅")
