@@ -281,9 +281,17 @@ class FrontendDesignLoop:
     """The design loop engine.  Manages theme generation, code generation,
     rendering, capture, audit, and refinement."""
 
-    def __init__(self, intent: str = None, max_iterations: int = None, status: LoopStatus = None, reference: str = None):
+    def __init__(
+        self,
+        intent: str = None,
+        max_iterations: int = None,
+        status: LoopStatus = None,
+        reference: str = None,
+        reconfigure: bool = False,
+    ):
         self.intent = intent
         self.reference = reference  # raw --reference value: a path or a URL
+        self.reconfigure = reconfigure  # force the provider wizard even when the saved config works
         self.reference_png = None  # normalized PNG, set by _acquire_reference
         self.max_iterations = max_iterations or config.MAX_ITERATIONS
         self.status = status or LoopStatus()
@@ -309,6 +317,40 @@ class FrontendDesignLoop:
             f.write("</html>")
         with open(config.VERSION_PATH, "w") as f:
             f.write("0")
+
+    def _resolve_providers(self, port: int, reconfigure: bool = False) -> bool:
+        """Settle on a provider config. False means the run cannot proceed.
+
+        Waits for the browser wizard only when waiting could change the outcome.
+        A saved config whose roles already resolve to live models needs no
+        round-trip, and blocking for one turns every unattended CLI run into a
+        ten-minute stall at a URL nobody is watching. --reconfigure forces the
+        wizard so skipping it never costs you the ability to switch models.
+        """
+        if not reconfigure:
+            saved = ProviderConfig()
+            if saved.from_disk and llm_client.preflight_roles(saved)[0]:
+                self.provider_config = saved
+                label = _model_label(saved)
+                self.status.set_model_label(label)
+                print(f"✅ Using saved provider configuration ({label}).")
+                print(f"   Change it at http://localhost:{port}/provider_wizard.html?mode=settings")
+                return True
+
+        self.status.set_phase("wizard", "Configure providers")
+        print(f"\n⚙️ VIEW PROVIDER WIZARD: http://localhost:{port}/provider_wizard.html?mode=setup")
+        print("Waiting for provider configuration...")
+        self.status.await_provider_config(timeout=600)
+        self.provider_config = ProviderConfig()
+        self.status.set_model_label(_model_label(self.provider_config))
+        print("✅ Provider configuration received.")
+
+        ok, detail = llm_client.preflight_roles(self.provider_config)
+        if not ok:
+            print(f"\n❌ {detail}")
+            print(f"   Reconfigure the model at http://localhost:{port}/provider_wizard.html?mode=settings and re-run.")
+            return False
+        return True
 
     def _acquire_reference(self):
         """Normalize --reference into one bounded PNG under screenshots/.
@@ -1156,20 +1198,8 @@ class FrontendDesignLoop:
         if not resume:
             self.bootstrap()
 
-            # Provider Configuration Wizard (pre-flight)
-            self.status.set_phase("wizard", "Configure providers")
-            print(f"\n⚙️ VIEW PROVIDER WIZARD: http://localhost:{port}/provider_wizard.html?mode=setup")
-            print("Waiting for provider configuration...")
-            self.status.await_provider_config(timeout=600)
-            self.provider_config = ProviderConfig()
-            self.status.set_model_label(_model_label(self.provider_config))
-            print("✅ Provider configuration received.")
-
-            # Pre-flight: confirm each role has a usable model before any generation.
-            ok, detail = llm_client.preflight_roles(self.provider_config)
-            if not ok:
-                print(f"\n❌ {detail}")
-                print(f"   Reconfigure the model at http://localhost:{port}/provider_wizard.html?mode=settings and re-run.")
+            # Provider config + pre-flight: prompts only when prompting would help.
+            if not self._resolve_providers(port, reconfigure=self.reconfigure):
                 return
 
             # Reference seeding: capture first, then prove the brain can read it.

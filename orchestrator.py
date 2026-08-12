@@ -26,6 +26,11 @@ def parse_args(argv=None):
         metavar="PATH_OR_URL",
         help="seed the theme and first draft from a screenshot or a live URL (fresh runs only)",
     )
+    p.add_argument(
+        "--reconfigure",
+        action="store_true",
+        help="always open the provider wizard, even when the saved config already works",
+    )
     g = p.add_mutually_exclusive_group()
     g.add_argument("--resume", action="store_true", help="resume an unfinished run without prompting")
     g.add_argument("--fresh", action="store_true", help="discard any unfinished run state")
@@ -72,7 +77,13 @@ def main():
     resume = decide_resume(args, RunState())
     status = LoopStatus()
     server = LivePreviewServer(status=status, port=args.port)
-    loop = FrontendDesignLoop(args.intent, max_iterations=args.max_iterations, status=status, reference=args.reference)
+    loop = FrontendDesignLoop(
+        args.intent,
+        max_iterations=args.max_iterations,
+        status=status,
+        reference=args.reference,
+        reconfigure=args.reconfigure,
+    )
     server.start()
     try:
         loop.run(port=server.port, resume=resume)
