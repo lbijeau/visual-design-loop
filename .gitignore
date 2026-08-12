@@ -28,3 +28,7 @@ tmp*.html
 *-iter*.png
 .playwright-mcp/
 *.swp
+
+# Agent tooling scratch dirs
+.pi/
+.pi-subagents/

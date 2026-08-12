@@ -6,6 +6,8 @@ import os
 import sys
 import tempfile
 
+import requests
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import llm_client
@@ -887,6 +889,159 @@ def test_preflight_roles_dedupe():
     print("✅")
 
 
+def test_probe_vision_reads_the_digits():
+    print("  test_probe_vision_reads_the_digits...", end=" ")
+    provider = {"id": "ollama", "baseUrl": "http://localhost:11434"}
+    calls = []
+
+    def fake_call(prov, messages, model_id, **kwargs):
+        calls.append((prov, messages, model_id, kwargs))
+        return "The number is 738."
+
+    original = llm_client._do_api_call
+    llm_client._do_api_call = fake_call
+    try:
+        state, detail = llm_client.probe_vision(provider, "qwen-vl")
+    finally:
+        llm_client._do_api_call = original
+
+    assert state == "can_see", detail
+    # Lenient matching: prose around the digits must still pass.
+    assert calls[0][3]["retries"] == 2, "one warm retry, so a cold-loading model gets a second chance"
+    assert calls[0][3]["timeout"] >= 300, "must outlast a model cold-loading into VRAM"
+    assert "images" in calls[0][1][-1], "the probe must actually attach the image"
+    print("✅")
+
+
+def test_probe_vision_rejects_a_blind_model():
+    print("  test_probe_vision_rejects_a_blind_model...", end=" ")
+    provider = {"id": "ollama", "baseUrl": "http://localhost:11434"}
+
+    original = llm_client._do_api_call
+    llm_client._do_api_call = lambda *a, **kw: "I cannot see any image."
+    try:
+        state, detail = llm_client.probe_vision(provider, "llama-text")
+    finally:
+        llm_client._do_api_call = original
+
+    assert state == "blind"
+    assert "738" in detail
+    print("✅")
+
+
+def test_probe_vision_timeout_is_inconclusive_not_blind():
+    """A cold-loading vision model must not be reported as incapable: the run
+    still stops, but for the reason that actually occurred."""
+    print("  test_probe_vision_timeout_is_inconclusive_not_blind...", end=" ")
+    provider = {"id": "ollama", "baseUrl": "http://localhost:11434"}
+
+    def slow(*a, **kw):
+        raise requests.exceptions.ReadTimeout("total deadline 300s exceeded")
+
+    original = llm_client._do_api_call
+    llm_client._do_api_call = slow
+    try:
+        state, detail = llm_client.probe_vision(provider, "llava-cold")
+    finally:
+        llm_client._do_api_call = original
+
+    assert state == "inconclusive", f"a timeout is not evidence of blindness: {detail}"
+    assert "did not complete" in detail
+    print("✅")
+
+
+def test_probe_vision_treats_http_error_as_blind():
+    print("  test_probe_vision_treats_http_error_as_blind...", end=" ")
+    provider = {"id": "openai", "baseUrl": "https://api.openai.com/v1"}
+
+    def boom(*a, **kw):
+        raise requests.exceptions.HTTPError("400 Bad Request: image input not supported")
+
+    original = llm_client._do_api_call
+    llm_client._do_api_call = boom
+    try:
+        state, detail = llm_client.probe_vision(provider, "gpt-text")
+    finally:
+        llm_client._do_api_call = original
+
+    # OpenAI 400s, llama.cpp 500s. Either way the reference is unusable.
+    assert state == "blind"
+    assert "probe call failed" in detail
+    print("✅")
+
+
+def test_preflight_vision_probes_every_candidate():
+    print("  test_preflight_vision_probes_every_candidate...", end=" ")
+
+    class FakeConfig:
+        def get_role(self, role):
+            return {"providerId": "primary", "fallbackOrder": ["backup"]}
+
+        def resolve(self, pid):
+            return {"id": pid, "baseUrl": f"http://{pid}"}
+
+        def get_model_id(self, provider):
+            return f"model-{provider['id']}"
+
+    seen = []
+
+    def fake_probe(provider, model_id, timeout=300):
+        seen.append(model_id)
+        # The primary can see; the fallback cannot. call_llm would fall through to
+        # it on any transient error, so this must fail the whole preflight.
+        return ("can_see", "") if model_id == "model-primary" else ("blind", "answered '12'")
+
+    original = llm_client.probe_vision
+    llm_client.probe_vision = fake_probe
+    try:
+        ok, detail = llm_client.preflight_vision(FakeConfig())
+    finally:
+        llm_client.probe_vision = original
+
+    assert seen == ["model-primary", "model-backup"], f"probed {seen}"
+    assert ok is False
+    assert "model-backup" in detail and "cannot see images" in detail
+    print("✅")
+
+
+def test_preflight_vision_probes_the_legacy_env_fallback():
+    """An unresolvable candidate id makes call_llm run the legacy env provider
+    unconditionally, so skipping it would leave that model unprobed."""
+    print("  test_preflight_vision_probes_the_legacy_env_fallback...", end=" ")
+
+    class StaleConfig:
+        def get_role(self, role):
+            return {"providerId": "primary", "fallbackOrder": ["deleted-provider"]}
+
+        def resolve(self, pid):
+            if pid == "deleted-provider":
+                raise KeyError(pid)
+            return {"id": pid, "baseUrl": f"http://{pid}"}
+
+        def get_model_id(self, provider):
+            return f"model-{provider['id']}"
+
+    seen = []
+
+    def fake_probe(provider, model_id, timeout=300):
+        seen.append((provider["id"], model_id))
+        # The configured primary can see; the legacy env model cannot.
+        return ("can_see", "") if model_id == "model-primary" else ("blind", "answered '4'")
+
+    original = llm_client.probe_vision
+    llm_client.probe_vision = fake_probe
+    try:
+        ok, detail = llm_client.preflight_vision(StaleConfig())
+    finally:
+        llm_client.probe_vision = original
+
+    assert len(seen) == 2, f"the legacy fallback was not probed: {seen}"
+    assert seen[1][0] == "ollama" and seen[1][1] == llm_client.GLOBAL_MODEL_ID
+    assert ok is False
+    assert "legacy env fallback" in detail
+    print("✅")
+
+
 if __name__ == "__main__":
     print("\n=== Multi-Provider LLM Caller Tests ===")
     test_build_ollama_payload()
@@ -922,6 +1077,12 @@ if __name__ == "__main__":
     test_preflight_roles_inconclusive_passes()
     test_preflight_roles_unresolvable_no_crash()
     test_preflight_roles_dedupe()
+    test_probe_vision_reads_the_digits()
+    test_probe_vision_rejects_a_blind_model()
+    test_probe_vision_timeout_is_inconclusive_not_blind()
+    test_probe_vision_treats_http_error_as_blind()
+    test_preflight_vision_probes_every_candidate()
+    test_preflight_vision_probes_the_legacy_env_fallback()
     print("\nAll tests passed ✅")
     # Note: test_do_api_call_retries_knob uses pytest's monkeypatch fixture
     # and is run separately via pytest

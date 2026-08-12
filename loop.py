@@ -281,8 +281,10 @@ class FrontendDesignLoop:
     """The design loop engine.  Manages theme generation, code generation,
     rendering, capture, audit, and refinement."""
 
-    def __init__(self, intent: str = None, max_iterations: int = None, status: LoopStatus = None):
+    def __init__(self, intent: str = None, max_iterations: int = None, status: LoopStatus = None, reference: str = None):
         self.intent = intent
+        self.reference = reference  # raw --reference value: a path or a URL
+        self.reference_png = None  # normalized PNG, set by _acquire_reference
         self.max_iterations = max_iterations or config.MAX_ITERATIONS
         self.status = status or LoopStatus()
         self.current_code = ""
@@ -308,6 +310,33 @@ class FrontendDesignLoop:
         with open(config.VERSION_PATH, "w") as f:
             f.write("0")
 
+    def _acquire_reference(self):
+        """Normalize --reference into one bounded PNG under screenshots/.
+
+        Raises on every failure path: a reference that was asked for and cannot be
+        used must stop the run, never degrade it to a reference-less design.
+        """
+        config.SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
+        out = config.SCREENSHOT_DIR / f"reference_{int(time.time())}.png"
+        source = self.reference
+        if not re.match(r"^https?://", source, re.IGNORECASE):
+            # The subprocess runs with cwd=PROJECT_DIR, so a relative path would
+            # otherwise resolve against the project rather than the user's shell.
+            source = os.path.abspath(os.path.expanduser(source))
+            if not os.path.exists(source):
+                raise Exception(f"reference file not found: {source}")
+        result = subprocess.run(
+            ["node", str(config.REFERENCE_SCRIPT), source, str(out)],
+            capture_output=True,
+            text=True,
+            cwd=str(config.PROJECT_DIR),
+            timeout=180,
+        )
+        if result.returncode != 0 or not out.exists():
+            raise Exception(f"reference capture failed: {result.stderr.strip()[:300]}")
+        self.reference_png = str(out)
+        return self.reference_png
+
     def _get_reload_script(self):
         return """
         <script>
@@ -330,8 +359,14 @@ class FrontendDesignLoop:
 
     def generate_theme(self):
         print("\n[0/4] Generating design theme...")
+        reference_block = ""
+        if self.reference_png:
+            reference_block = """
+        REFERENCE IMAGE: The attached image is a design reference. Derive the tokens from the colors and typography actually present in it — sample its real palette instead of inventing one.
+        You cannot identify a typeface from a screenshot. classify it instead ("geometric sans", "humanist sans", "transitional serif", "slab serif", "monospace") and set primary_font to the closest widely-available web font for that classification.
+        """
         prompt = f"""
-        Create a professional design theme for a website with the following intent: {self.intent}.
+        Create a professional design theme for a website with the following intent: {self.intent}.{reference_block}
 
         Return ONLY a JSON object with the following structure:
         {{
@@ -368,7 +403,13 @@ class FrontendDesignLoop:
 
         Ensure colors are high-contrast and professional. Do not include any markdown blocks.
         """
-        theme_str = llm_client.call_llm("brain", prompt, system_prompt=THEME_SYSTEM_PROMPT, provider_config=self.provider_config)
+        theme_str = llm_client.call_llm(
+            "brain",
+            prompt,
+            system_prompt=THEME_SYSTEM_PROMPT,
+            image_path=self.reference_png,
+            provider_config=self.provider_config,
+        )
         theme_str = theme_str.replace("```json", "").replace("```", "").strip()
 
         try:
@@ -377,6 +418,11 @@ class FrontendDesignLoop:
                 json.dump(self.theme_json, f, indent=2)
             print(f"✅ Theme saved to {config.THEME_PATH}")
         except json.JSONDecodeError as e:
+            if self.reference_png:
+                raise Exception(
+                    f"theme JSON unparseable ({e}) — refusing to fall back to a generic palette "
+                    "on an image-seeded run, which would put a generic palette on a reference-shaped layout"
+                )
             print(f"❌ Failed to parse theme JSON: {e}")
             self.theme_json = {
                 "hard_tokens": {"brand_primary": "#000000", "brand_secondary": "#ffffff", "primary_font": "sans-serif"},
@@ -441,8 +487,14 @@ class FrontendDesignLoop:
         You MUST use these tokens for all colors, fonts, and spacing.
         Do not use any arbitrary hex colors or spacing values.
         """
+        structural_reference = ""
+        if self.reference_png:
+            structural_reference = """
+        STRUCTURAL REFERENCE: The attached image is a layout reference. Follow its visual hierarchy, section order, information density and component vocabulary. The INTENT alone decides what content exists — do not copy text, logos, imagery or subject matter from the reference.
+        Where colors in the reference disagree with the MANDATORY DESIGN TOKENS above, the tokens win. Never sample a hex value out of the image.
+        """
         prompt = f"""
-        {theme_context}
+        {theme_context}{structural_reference}
 
         MULTI-VIEW CONVENTION: If the design needs multiple views/screens (e.g. an app with sidebar navigation), keep everything in this single file with ALL views' full content present in the static markup. Tag each navigation trigger with data-view="<kebab-id>" and its content container with data-view-panel="<same-id>". Hide inactive panels with the hidden attribute and toggle visibility on click with a few lines of inline JavaScript. Each view id must name exactly ONE data-view-panel, and every data-view-panel must have at least one matching data-view trigger. A view may be reached from several triggers (the same link in the desktop nav, the mobile menu and the footer) — that is fine; two different screens sharing one id is not. Do not build panel content at runtime and do not add utility classes from JavaScript. Single-view pages must not use these attributes.
 
@@ -457,7 +509,12 @@ class FrontendDesignLoop:
         Output ONLY the complete HTML file content. Do not include markdown blocks.
         """
         self.current_code = llm_client.call_llm(
-            "brain", prompt, system_prompt=BRAIN_SYSTEM_PROMPT, timeout=FULL_FILE_TIMEOUT, provider_config=self.provider_config
+            "brain",
+            prompt,
+            system_prompt=BRAIN_SYSTEM_PROMPT,
+            image_path=self.reference_png,
+            timeout=FULL_FILE_TIMEOUT,
+            provider_config=self.provider_config,
         )
         self.current_code = self.current_code.replace("```html", "").replace("```", "").strip()
 
@@ -714,6 +771,8 @@ class FrontendDesignLoop:
     def _run_meta(self) -> dict:
         return {
             "intent": self.intent,
+            "reference": self.reference,
+            "reference_png": self.reference_png,
             "theme_json": self.theme_json,
             "iteration": self.iteration,
             "undo_pointer": self.undo_pointer,
@@ -1095,7 +1154,6 @@ class FrontendDesignLoop:
                 converged_initial = False
 
         if not resume:
-            self.run_state.clear()
             self.bootstrap()
 
             # Provider Configuration Wizard (pre-flight)
@@ -1113,6 +1171,28 @@ class FrontendDesignLoop:
                 print(f"\n❌ {detail}")
                 print(f"   Reconfigure the model at http://localhost:{port}/provider_wizard.html?mode=settings and re-run.")
                 return
+
+            # Reference seeding: capture first, then prove the brain can read it.
+            # Both must happen before the intent wait so a failure surfaces at once.
+            if self.reference:
+                print(f"\n🖼️ Capturing design reference: {self.reference}")
+                try:
+                    self._acquire_reference()
+                except Exception as e:
+                    print(f"\n❌ {e}")
+                    return
+                print(f"✅ Reference captured: {self.reference_png}")
+                ok, detail = llm_client.preflight_vision(self.provider_config)
+                if not ok:
+                    print(f"\n❌ {detail}")
+                    print(f"   Choose a vision-capable model at http://localhost:{port}/provider_wizard.html?mode=settings and re-run.")
+                    return
+
+            # Discard the previous run only once this one is certain to proceed.
+            # --reference forces resume=False (orchestrator.decide_resume), so clearing
+            # any earlier would let a mistyped reference path destroy an unfinished run
+            # the user never chose to abandon.
+            self.run_state.clear()
 
             # Intent input (if no CLI arg)
             if not self.intent:
@@ -1132,6 +1212,10 @@ class FrontendDesignLoop:
             try:
                 self.generate_theme()
             except Exception as e:
+                if self.reference:
+                    print(f"\n❌ Theme generation failed on an image-seeded run: {e}")
+                    print("   The reference cannot be honoured without tokens derived from it. Exiting.")
+                    return
                 print(f"⚠️ Theme generation failed: {e}. Proceeding without design tokens.")
                 self.theme_json = {}
             self.run_state.save_run(self._run_meta())
@@ -1273,6 +1357,11 @@ class FrontendDesignLoop:
         self.status.set_model_label(_model_label(self.provider_config))
 
         self.intent = meta.get("intent")
+        # run.json is rewritten wholesale from _run_meta() at every save site, so a
+        # field not restored here is erased by the first save after a resume — losing
+        # the record of what seeded the design.
+        self.reference = meta.get("reference")
+        self.reference_png = meta.get("reference_png")
         self.max_iterations = meta.get("max_iterations", self.max_iterations)
         self.status.set_max_iterations(self.max_iterations)
         self.iteration = meta.get("iteration", latest)

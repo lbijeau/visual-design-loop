@@ -148,7 +148,111 @@ def test_model_label_guards_unresolvable_provider():
     print("✅")
 
 
+def _capture_call(loop_obj, method):
+    """Run a seed method against a stubbed LLM, returning the recorded kwargs."""
+    seen = {}
+
+    def mock_llm(role, prompt, system_prompt=None, image_path=None, **kwargs):
+        seen["prompt"] = prompt
+        seen["image_path"] = image_path
+        return json.dumps(
+            {
+                "hard_tokens": {"brand_primary": "#000", "brand_secondary": "#fff", "primary_font": "sans-serif"},
+                "soft_tokens": {"accent_color": "#3b82f6", "border_radius": "4px", "spacing_unit": "4px"},
+                "tailwind_config": {"theme": {"extend": {}}},
+            }
+        )
+
+    original = llm_client.call_llm
+    llm_client.call_llm = mock_llm
+    try:
+        method()
+    finally:
+        llm_client.call_llm = original
+    return seen
+
+
+def test_reference_paragraphs_absent_without_a_reference():
+    print("  test_reference_paragraphs_absent_without_a_reference...", end=" ")
+    loop = FrontendDesignLoop("a coffee shop")
+
+    theme = _capture_call(loop, loop.generate_theme)
+    assert theme["image_path"] is None
+    assert "REFERENCE IMAGE" not in theme["prompt"]
+    # Byte-identity guarantee: an empty reference_block must collapse to nothing,
+    # not leave a whitespace-only line after the intent (Global Constraint).
+    assert "following intent: a coffee shop.\n\n        Return ONLY" in theme["prompt"], (
+        "empty reference_block left a stray whitespace line — no-reference runs must be byte-identical"
+    )
+    assert "following intent: a coffee shop.\n        \n" not in theme["prompt"]
+
+    loop2 = FrontendDesignLoop("a coffee shop")
+    loop2.theme_json = {"hard_tokens": {}, "soft_tokens": {}, "tailwind_config": {"theme": {"extend": {}}}}
+    code = _capture_call(loop2, loop2.generate_initial_code)
+    assert code["image_path"] is None
+    assert "STRUCTURAL REFERENCE" not in code["prompt"]
+    # Same guarantee for the structural block: an empty value must not double the
+    # trailing whitespace line that theme_context already contributes.
+    assert "or spacing values.\n        \n        \n" not in code["prompt"], (
+        "empty structural_reference left a stray whitespace line — no-reference runs must be byte-identical"
+    )
+    print("✅")
+
+
+def test_reference_paragraphs_and_image_threaded():
+    print("  test_reference_paragraphs_and_image_threaded...", end=" ")
+    loop = FrontendDesignLoop("a coffee shop")
+    loop.reference_png = "/tmp/reference_1.png"
+
+    theme = _capture_call(loop, loop.generate_theme)
+    assert theme["image_path"] == "/tmp/reference_1.png"
+    assert "REFERENCE IMAGE" in theme["prompt"]
+    assert "classify" in theme["prompt"], "the typeface limitation must be stated"
+
+    code = _capture_call(loop, loop.generate_initial_code)
+    assert code["image_path"] == "/tmp/reference_1.png"
+    assert "STRUCTURAL REFERENCE" in code["prompt"]
+    assert "the tokens win" in code["prompt"], "token precedence must be explicit"
+    print("✅")
+
+
+def test_unparseable_theme_falls_back_without_a_reference():
+    print("  test_unparseable_theme_falls_back_without_a_reference...", end=" ")
+    loop = FrontendDesignLoop("a coffee shop")
+
+    original = llm_client.call_llm
+    llm_client.call_llm = lambda *a, **kw: "not json at all"
+    try:
+        loop.generate_theme()  # must NOT raise
+    finally:
+        llm_client.call_llm = original
+
+    assert loop.theme_json["hard_tokens"]["brand_primary"] == "#000000"
+    print("✅")
+
+
+def test_unparseable_theme_aborts_with_a_reference():
+    print("  test_unparseable_theme_aborts_with_a_reference...", end=" ")
+    loop = FrontendDesignLoop("a coffee shop")
+    loop.reference_png = "/tmp/reference_1.png"
+
+    original = llm_client.call_llm
+    llm_client.call_llm = lambda *a, **kw: "not json at all"
+    try:
+        loop.generate_theme()
+        assert False, "expected an abort on an image-seeded run"
+    except Exception as e:
+        assert "generic palette" in str(e)
+    finally:
+        llm_client.call_llm = original
+    print("✅")
+
+
 if __name__ == "__main__":
     test_theme_validation_loop()
     test_theme_gate_like_for_like_baseline_and_no_status_write()
     test_model_label_guards_unresolvable_provider()
+    test_reference_paragraphs_absent_without_a_reference()
+    test_reference_paragraphs_and_image_threaded()
+    test_unparseable_theme_falls_back_without_a_reference()
+    test_unparseable_theme_aborts_with_a_reference()
