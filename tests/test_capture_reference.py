@@ -101,6 +101,9 @@ def test_tall_page_is_clamped():
     assert result.returncode == 0, f"capture failed: {result.stderr}"
     w, h = png_size(out)
     assert (w, h) == (1280, 2400), f"expected a 1280x2400 clamp, got {w}x{h}"
+    # The seed prompt asks the model to follow the reference's section order, so the
+    # truncation must be visible rather than silent.
+    assert "warn:" in result.stderr and "2400px" in result.stderr, f"clamp was silent: {result.stderr!r}"
     print("✅")
 
 
@@ -175,6 +178,12 @@ def test_undecodable_file_exits_nonzero():
         f.write(b"not an image at all")
     result = _run(src, out)
     assert result.returncode != 0, "an undecodable file must fail loudly"
+    # The underlying Playwright reason must survive: a timeout on a large-but-valid
+    # image reads very differently from a corrupt file.
+    assert "could not load image" in result.stderr, result.stderr
+    assert src in result.stderr and result.stderr.strip() != f"Error: could not load image {src}: ", (
+        f"the underlying reason was swallowed: {result.stderr!r}"
+    )
     print("✅")
 
 

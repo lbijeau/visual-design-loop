@@ -51,7 +51,10 @@ async function shootImage(page, filePath) {
       { timeout: 15000 },
     );
   } catch (err) {
-    throw new Error(`could not decode image: ${filePath}`);
+    // Keep the underlying reason: a waitForFunction timeout on a large-but-valid
+    // image reads very differently from a genuinely corrupt file, and collapsing
+    // both into "could not decode" sends the user after the wrong problem.
+    throw new Error(`could not load image ${filePath}: ${err.message}`);
   } finally {
     fs.unlinkSync(shim);
   }
@@ -72,6 +75,14 @@ async function capture(source, outPath) {
     }
     const full = await page.evaluate(() => document.documentElement.scrollHeight);
     const height = Math.max(1, Math.min(full, MAX_HEIGHT));
+    if (full > MAX_HEIGHT) {
+      // The seed prompt asks the model to follow the reference's section order, so a
+      // silent truncation would hand it a partial page while claiming otherwise.
+      console.error(
+        `warn: reference is ${full}px tall; seeding from the top ${MAX_HEIGHT}px only ` +
+          `(everything below is not sent to the model)`,
+      );
+    }
     await page.screenshot({ path: outPath, fullPage: true, clip: { x: 0, y: 0, width: WIDTH, height } });
   } finally {
     await browser.close();

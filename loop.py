@@ -318,8 +318,15 @@ class FrontendDesignLoop:
         """
         config.SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
         out = config.SCREENSHOT_DIR / f"reference_{int(time.time())}.png"
+        source = self.reference
+        if not re.match(r"^https?://", source, re.IGNORECASE):
+            # The subprocess runs with cwd=PROJECT_DIR, so a relative path would
+            # otherwise resolve against the project rather than the user's shell.
+            source = os.path.abspath(os.path.expanduser(source))
+            if not os.path.exists(source):
+                raise Exception(f"reference file not found: {source}")
         result = subprocess.run(
-            ["node", str(config.REFERENCE_SCRIPT), self.reference, str(out)],
+            ["node", str(config.REFERENCE_SCRIPT), source, str(out)],
             capture_output=True,
             text=True,
             cwd=str(config.PROJECT_DIR),
@@ -1147,7 +1154,6 @@ class FrontendDesignLoop:
                 converged_initial = False
 
         if not resume:
-            self.run_state.clear()
             self.bootstrap()
 
             # Provider Configuration Wizard (pre-flight)
@@ -1181,6 +1187,12 @@ class FrontendDesignLoop:
                     print(f"\n❌ {detail}")
                     print(f"   Choose a vision-capable model at http://localhost:{port}/provider_wizard.html?mode=settings and re-run.")
                     return
+
+            # Discard the previous run only once this one is certain to proceed.
+            # --reference forces resume=False (orchestrator.decide_resume), so clearing
+            # any earlier would let a mistyped reference path destroy an unfinished run
+            # the user never chose to abandon.
+            self.run_state.clear()
 
             # Intent input (if no CLI arg)
             if not self.intent:
@@ -1345,6 +1357,11 @@ class FrontendDesignLoop:
         self.status.set_model_label(_model_label(self.provider_config))
 
         self.intent = meta.get("intent")
+        # run.json is rewritten wholesale from _run_meta() at every save site, so a
+        # field not restored here is erased by the first save after a resume — losing
+        # the record of what seeded the design.
+        self.reference = meta.get("reference")
+        self.reference_png = meta.get("reference_png")
         self.max_iterations = meta.get("max_iterations", self.max_iterations)
         self.status.set_max_iterations(self.max_iterations)
         self.iteration = meta.get("iteration", latest)

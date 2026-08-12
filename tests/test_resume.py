@@ -45,18 +45,18 @@ THEME = {
 AUDIT = {"overall_score": 60, "bugs": [{"severity": "minor", "issue": "x"}], "summary": "restored"}
 
 
-def _seed_state(rs, iteration=2):
-    rs.save_run(
-        {
-            "intent": "seeded intent",
-            "theme_json": THEME,
-            "iteration": iteration,
-            "undo_pointer": iteration,
-            "phase": "awaiting-feedback",
-            "max_iterations": 5,
-            "finished": False,
-        }
-    )
+def _seed_state(rs, iteration=2, **extra):
+    meta = {
+        "intent": "seeded intent",
+        "theme_json": THEME,
+        "iteration": iteration,
+        "undo_pointer": iteration,
+        "phase": "awaiting-feedback",
+        "max_iterations": 5,
+        "finished": False,
+    }
+    meta.update(extra)
+    rs.save_run(meta)
     for n in range(1, iteration + 1):
         rs.snapshot(n, f"<html><body>SEED-V{n}</body></html>", THEME, AUDIT)
 
@@ -93,6 +93,27 @@ def test_resume_restores_and_skips_generation():
     assert loop_obj.status.get_status()["model_label"] != ""  # model badge restored
     assert loop_obj.status.get_audit() == AUDIT
     assert rs.load_run()["finished"] is True
+    print("✅")
+
+
+def test_resume_preserves_the_reference_record():
+    """run.json is rewritten wholesale from _run_meta(), so any field _restore_run
+    forgets is erased by the first save after a resume."""
+    print("  test_resume_preserves_the_reference_record...", end=" ")
+    rs = RunState(Path(tempfile.mkdtemp()) / "run_state")
+    _seed_state(rs, iteration=2, reference="https://example.com/x", reference_png="/tmp/reference_1.png")
+
+    loop_obj = FrontendDesignLoop(None, max_iterations=3)
+    loop_obj.run_state = rs
+    loop_obj.status.signal_provider_config()  # anti-hang guard, as above
+    assert loop_obj._restore_run(port=0) is not None
+
+    assert loop_obj.reference == "https://example.com/x"
+    assert loop_obj.reference_png == "/tmp/reference_1.png"
+
+    rs.save_run(loop_obj._run_meta())  # the rewrite that used to null them
+    assert rs.load_run()["reference"] == "https://example.com/x"
+    assert rs.load_run()["reference_png"] == "/tmp/reference_1.png"
     print("✅")
 
 
@@ -144,5 +165,6 @@ def test_resume_without_snapshots_degrades_to_fresh():
 if __name__ == "__main__":
     print("\n=== Resume Tests ===")
     test_resume_restores_and_skips_generation()
+    test_resume_preserves_the_reference_record()
     test_resume_without_snapshots_degrades_to_fresh()
     print("\nAll tests passed ✅")
