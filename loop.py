@@ -359,8 +359,7 @@ class FrontendDesignLoop:
         You cannot identify a typeface from a screenshot. classify it instead ("geometric sans", "humanist sans", "transitional serif", "slab serif", "monospace") and set primary_font to the closest widely-available web font for that classification.
         """
         prompt = f"""
-        Create a professional design theme for a website with the following intent: {self.intent}.
-        {reference_block}
+        Create a professional design theme for a website with the following intent: {self.intent}.{reference_block}
 
         Return ONLY a JSON object with the following structure:
         {{
@@ -488,8 +487,7 @@ class FrontendDesignLoop:
         Where colors in the reference disagree with the MANDATORY DESIGN TOKENS above, the tokens win. Never sample a hex value out of the image.
         """
         prompt = f"""
-        {theme_context}
-        {structural_reference}
+        {theme_context}{structural_reference}
 
         MULTI-VIEW CONVENTION: If the design needs multiple views/screens (e.g. an app with sidebar navigation), keep everything in this single file with ALL views' full content present in the static markup. Tag each navigation trigger with data-view="<kebab-id>" and its content container with data-view-panel="<same-id>". Hide inactive panels with the hidden attribute and toggle visibility on click with a few lines of inline JavaScript. Each view id must name exactly ONE data-view-panel, and every data-view-panel must have at least one matching data-view trigger. A view may be reached from several triggers (the same link in the desktop nav, the mobile menu and the footer) — that is fine; two different screens sharing one id is not. Do not build panel content at runtime and do not add utility classes from JavaScript. Single-view pages must not use these attributes.
 

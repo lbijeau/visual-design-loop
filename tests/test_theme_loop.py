@@ -179,10 +179,23 @@ def test_reference_paragraphs_absent_without_a_reference():
     theme = _capture_call(loop, loop.generate_theme)
     assert theme["image_path"] is None
     assert "REFERENCE IMAGE" not in theme["prompt"]
+    # Byte-identity guarantee: an empty reference_block must collapse to nothing,
+    # not leave a whitespace-only line after the intent (Global Constraint).
+    assert "following intent: a coffee shop.\n\n        Return ONLY" in theme["prompt"], (
+        "empty reference_block left a stray whitespace line — no-reference runs must be byte-identical"
+    )
+    assert "following intent: a coffee shop.\n        \n" not in theme["prompt"]
 
-    code = _capture_call(loop, loop.generate_initial_code)
+    loop2 = FrontendDesignLoop("a coffee shop")
+    loop2.theme_json = {"hard_tokens": {}, "soft_tokens": {}, "tailwind_config": {"theme": {"extend": {}}}}
+    code = _capture_call(loop2, loop2.generate_initial_code)
     assert code["image_path"] is None
     assert "STRUCTURAL REFERENCE" not in code["prompt"]
+    # Same guarantee for the structural block: an empty value must not double the
+    # trailing whitespace line that theme_context already contributes.
+    assert "or spacing values.\n        \n        \n" not in code["prompt"], (
+        "empty structural_reference left a stray whitespace line — no-reference runs must be byte-identical"
+    )
     print("✅")
 
 
