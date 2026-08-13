@@ -534,8 +534,7 @@ def preflight_vision(provider_config: ProviderConfig, role: str = "brain") -> Tu
         if state == "blind":
             return (
                 False,
-                f"{role} model '{model_id}' (provider '{pid}') cannot see images — "
-                f"the reference would be silently ignored ({detail})",
+                f"{role} model '{model_id}' (provider '{pid}') cannot see images — the reference would be silently ignored ({detail})",
             )
         if state == "inconclusive":
             return (
