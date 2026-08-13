@@ -95,10 +95,21 @@ Flags:
 | `--resume` / `--fresh` | Continue or discard an interrupted run (default: prompt) |
 | `--reference PATH_OR_URL` | Seed the theme and first draft from a screenshot or a live URL (fresh runs only) |
 | `--reconfigure` | Always open the provider wizard, even when the saved config already works |
+| `--auto` | Run unattended: refine from the audit alone until it converges or the budget runs out |
 
 When `providers.json` already resolves the brain and eyes roles to reachable models, the run uses it and starts immediately — so a CLI run needs no browser. The wizard is offered only when there is nothing saved, or when what is saved no longer works; `--reconfigure` opens it on demand.
 
 An optional `start.sh` launches the orchestrator detached; edit its hard-coded intent before using it. Its `providers.json` push is no longer needed to get a run started.
+
+### Unattended runs
+
+`--auto` never waits for feedback. At each gate it refines from the audit findings alone, pointed at the worst-scoring cell — the one holding the composite score down — and repeats until the design converges or `--max-iterations` is spent:
+
+```bash
+python3 orchestrator.py "a pricing page" --auto --max-iterations 5
+```
+
+It exits **0** when the design converges and **1** when the budget runs out first, so a pipeline can gate on it. An interactive run that you finish with `DONE` also exits 0. `--auto` requires an intent argument, since nothing can answer the web shell's prompt.
 
 ### Seeding from a reference
 

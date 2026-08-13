@@ -73,7 +73,7 @@ def test_render_preview_no_capture():
     print("✅")
 
 
-def _make_loop(codes, audits, intent="Test intent", max_iterations=5):
+def _make_loop(codes, audits, intent="Test intent", max_iterations=5, auto=False):
     """Loop with stubbed LLM + audit and isolated run state.
 
     codes: list of code strings the 'brain' returns for successive
@@ -100,7 +100,7 @@ def _make_loop(codes, audits, intent="Test intent", max_iterations=5):
 
     undo_export = _force_finish_stubs()
 
-    loop_obj = FrontendDesignLoop(intent, max_iterations=max_iterations)
+    loop_obj = FrontendDesignLoop(intent, max_iterations=max_iterations, auto=auto)
     loop_obj.run_state = RunState(Path(tempfile.mkdtemp()) / "run_state")
     loop_obj.status.signal_provider_config()  # skip wizard wait
     # Avoid node/Playwright: render the preview for real, skip the screenshot
@@ -115,6 +115,72 @@ def _make_loop(codes, audits, intent="Test intent", max_iterations=5):
 
 
 BAD_AUDIT = {"overall_score": 50, "bugs": [{"severity": "minor", "issue": "meh"}], "summary": "needs work"}
+GOOD_AUDIT = {"overall_score": 96, "bugs": [], "summary": "ship it"}
+
+
+def test_auto_refines_without_waiting_for_feedback():
+    """No action or feedback is queued: an interactive run would block at the
+    first gate forever. --auto must drive itself to the iteration budget."""
+    print("  test_auto_refines_without_waiting_for_feedback...", end=" ")
+    codes = [f"<html><body>V{n}</body></html>" for n in range(1, 4)]
+    loop_obj, prompts, restore = _make_loop(codes, [BAD_AUDIT] * 3, max_iterations=3, auto=True)
+    try:
+        outcome = loop_obj.run(port=0)
+    finally:
+        restore()
+    assert outcome == "exhausted", f"got {outcome}"
+    assert loop_obj.iteration == 3, f"expected the budget to be spent, got {loop_obj.iteration}"
+    assert loop_obj.status.get_status()["feedback_count"] == 0, "auto mode must not record human feedback"
+    print("✅")
+
+
+def test_auto_stops_at_convergence():
+    print("  test_auto_stops_at_convergence...", end=" ")
+    codes = [f"<html><body>V{n}</body></html>" for n in range(1, 4)]
+    loop_obj, _, restore = _make_loop(codes, [BAD_AUDIT, GOOD_AUDIT], max_iterations=5, auto=True)
+    try:
+        outcome = loop_obj.run(port=0)
+    finally:
+        restore()
+    assert outcome == "converged", f"got {outcome}"
+    assert loop_obj.iteration == 2, f"should stop the moment it converges, got {loop_obj.iteration}"
+    print("✅")
+
+
+def test_interactive_run_still_reports_its_outcome():
+    """run() returning an outcome is what lets main() set an exit code; the
+    interactive paths must report it too, not just --auto."""
+    print("  test_interactive_run_still_reports_its_outcome...", end=" ")
+    loop_obj, _, restore = _make_loop(["<html><body>V1</body></html>"], [BAD_AUDIT])
+    try:
+        loop_obj.status.put_action("accept")
+        outcome = loop_obj.run(port=0)
+    finally:
+        restore()
+    assert outcome == "accepted", f"got {outcome}"
+    print("✅")
+
+
+def test_worst_cell_picks_the_lowest_scoring_view():
+    """The composite score IS the worst cell, so an unattended refine must
+    attach that cell's screenshot rather than the default view's."""
+    print("  test_worst_cell_picks_the_lowest_scoring_view...", end=" ")
+    loop_obj, _, restore = _make_loop([], [])
+    try:
+        loop_obj.view_audits = {
+            "dashboard@desktop": {"audit": {"overall_score": 80, "bugs": []}, "iteration": 1},
+            "settings@mobile": {"audit": {"overall_score": 41, "bugs": []}, "iteration": 1},
+            "settings@desktop": {"audit": {"overall_score": 77, "bugs": []}, "iteration": 1},
+        }
+        loop_obj._capture_records = [
+            {"id": "dashboard", "breakpoint": "desktop", "screenshot": "dash.png"},
+            {"id": "settings", "breakpoint": "mobile", "screenshot": "settings-mobile.png"},
+            {"id": "settings", "breakpoint": "desktop", "screenshot": "settings-desktop.png"},
+        ]
+        assert loop_obj._worst_cell() == "settings@mobile"
+    finally:
+        restore()
+    print("✅")
 
 
 def test_keyword_translation_and_count():
@@ -1321,4 +1387,8 @@ if __name__ == "__main__":
     test_overlay_missing_focus_blocks_and_annotates()
     test_overlay_missing_focus_stale_topup_keeps_gate()
     test_combined_error_label()
+    test_auto_refines_without_waiting_for_feedback()
+    test_auto_stops_at_convergence()
+    test_interactive_run_still_reports_its_outcome()
+    test_worst_cell_picks_the_lowest_scoring_view()
     print("\nAll tests passed ✅")

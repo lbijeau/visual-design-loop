@@ -57,6 +57,32 @@ def test_reconfigure_flag():
     print("✅")
 
 
+def test_auto_flag_requires_an_intent():
+    """Nothing can answer the web shell's prompt in auto mode, so a missing
+    intent must fail at parse time rather than hang for ten minutes."""
+    print("  test_auto_flag_requires_an_intent...", end=" ")
+    assert parse_args([]).auto is False
+    assert parse_args(["a coffee shop", "--auto"]).auto is True
+    try:
+        parse_args(["--auto"])
+        assert False, "Should have raised SystemExit"
+    except SystemExit:
+        pass
+    print("✅")
+
+
+def test_auto_skips_resume_prompt():
+    print("  test_auto_skips_resume_prompt...", end=" ")
+    rs = RunState(Path(tempfile.mkdtemp()) / "run_state")
+    rs.save_run({"intent": "seeded", "iteration": 2, "max_iterations": 5, "finished": False})
+
+    def refuse(_q):
+        raise AssertionError("auto mode must never block on the resume prompt")
+
+    assert decide_resume(parse_args(["an intent", "--auto"]), rs, ask=refuse) is False
+    print("✅")
+
+
 def test_reference_skips_resume_prompt():
     print("  test_reference_skips_resume_prompt...", end=" ")
     rs = RunState(Path(tempfile.mkdtemp()) / "run_state")
@@ -102,5 +128,7 @@ if __name__ == "__main__":
     test_decide_resume()
     test_reference_parsing_and_resume_conflict()
     test_reconfigure_flag()
+    test_auto_flag_requires_an_intent()
+    test_auto_skips_resume_prompt()
     test_reference_skips_resume_prompt()
     print("\nAll tests passed ✅")

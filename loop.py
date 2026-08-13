@@ -288,10 +288,12 @@ class FrontendDesignLoop:
         status: LoopStatus = None,
         reference: str = None,
         reconfigure: bool = False,
+        auto: bool = False,
     ):
         self.intent = intent
         self.reference = reference  # raw --reference value: a path or a URL
         self.reconfigure = reconfigure  # force the provider wizard even when the saved config works
+        self.auto = auto  # drive the loop from the audit alone, never waiting for a human
         self.reference_png = None  # normalized PNG, set by _acquire_reference
         self.max_iterations = max_iterations or config.MAX_ITERATIONS
         self.status = status or LoopStatus()
@@ -1108,6 +1110,25 @@ class FrontendDesignLoop:
         print(f"💾 Draft saved to {draft_path}")
         self.status.set_phase("awaiting-feedback", f"Draft saved — iteration {self.iteration}")
 
+    def _worst_cell(self):
+        """The cell holding the composite score down, or None before any audit.
+
+        The composite score IS the worst cell (see composite_audit), so an
+        unattended refine has to target that cell — pointing the model at the
+        default view would leave the actual blocker untouched.
+        """
+        worst_cell, worst_score = None, None
+        for cell, entry in self.view_audits.items():
+            score = entry["audit"].get("overall_score", 0)
+            if worst_score is None or score < worst_score:
+                worst_cell, worst_score = cell, score
+        return worst_cell
+
+    def _cell_shot(self, cell):
+        """Screenshot for *cell*, falling back to the default shot."""
+        shots = {record_cell(r): r["screenshot"] for r in self._capture_records if r.get("screenshot")}
+        return shots.get(cell) or default_shot(self._capture_records)
+
     def _route_feedback(self, text):
         """Pick the screenshot to attach to a refine from feedback text: one
         unambiguously matched axis routes to a single cell (a matched state's
@@ -1200,7 +1221,7 @@ class FrontendDesignLoop:
 
             # Provider config + pre-flight: prompts only when prompting would help.
             if not self._resolve_providers(port, reconfigure=self.reconfigure):
-                return
+                return "failed"
 
             # Reference seeding: capture first, then prove the brain can read it.
             # Both must happen before the intent wait so a failure surfaces at once.
@@ -1210,13 +1231,13 @@ class FrontendDesignLoop:
                     self._acquire_reference()
                 except Exception as e:
                     print(f"\n❌ {e}")
-                    return
+                    return "failed"
                 print(f"✅ Reference captured: {self.reference_png}")
                 ok, detail = llm_client.preflight_vision(self.provider_config)
                 if not ok:
                     print(f"\n❌ {detail}")
                     print(f"   Choose a vision-capable model at http://localhost:{port}/provider_wizard.html?mode=settings and re-run.")
-                    return
+                    return "failed"
 
             # Discard the previous run only once this one is certain to proceed.
             # --reference forces resume=False (orchestrator.decide_resume), so clearing
@@ -1231,7 +1252,7 @@ class FrontendDesignLoop:
                 print("Waiting for intent input...")
                 if not self.status.await_intent(timeout=600):
                     print("No intent provided. Exiting.")
-                    return
+                    return "failed"
                 self.intent = self.status.intent
                 print(f"✅ Intent received: {self.intent}")
             self.run_state.save_run(self._run_meta())
@@ -1245,7 +1266,7 @@ class FrontendDesignLoop:
                 if self.reference:
                     print(f"\n❌ Theme generation failed on an image-seeded run: {e}")
                     print("   The reference cannot be honoured without tokens derived from it. Exiting.")
-                    return
+                    return "failed"
                 print(f"⚠️ Theme generation failed: {e}. Proceeding without design tokens.")
                 self.theme_json = {}
             self.run_state.save_run(self._run_meta())
@@ -1257,47 +1278,56 @@ class FrontendDesignLoop:
             except Exception as e:
                 print(f"\n❌ Initial code generation failed: {e}")
                 print("Check your LLM provider. Exiting.")
-                return
+                return "failed"
             try:
                 audit = self._produce_iteration()
                 converged_initial = self._check_convergence()
             except Exception as e:
                 print(f"\n❌ Initial render failed: {e}")
                 print("Exiting.")
-                return
+                return "failed"
 
         # Wait-first iteration loop
         outcome = "exhausted"
         if not converged_initial:
             while self.iteration < self.max_iterations:
-                self.status.set_phase("awaiting-feedback", f"Review iteration {self.iteration}")
-                if self._blocked_only_by_synthetic():
-                    print(
-                        "⚠️ Convergence blocked only by deterministic checks "
-                        "(focus indicators / toggle contract) — type DONE to accept as-is."
-                    )
-                print(f"\n👀 VIEW DESIGN SHELL: http://localhost:{port}/design_shell.html")
-                print(f"Visual Summary: {audit.get('summary')}")
-                print("Waiting for feedback... (DONE to accept, SAVE to save draft, UNDO to revert)")
-                msg = self._next_action(timeout=None)
+                if self.auto:
+                    # No gate: refine straight from the audit findings. There is
+                    # nobody to answer, so waiting here would stall forever.
+                    cell = self._worst_cell()
+                    print(f"\n🤖 Auto-refining {self.iteration + 1}/{self.max_iterations}" + (f" — worst cell: {cell}" if cell else ""))
+                    print(f"Visual Summary: {audit.get('summary')}")
+                    feedback_text, refine_img, refine_label = None, self._cell_shot(cell), cell
+                else:
+                    self.status.set_phase("awaiting-feedback", f"Review iteration {self.iteration}")
+                    if self._blocked_only_by_synthetic():
+                        print(
+                            "⚠️ Convergence blocked only by deterministic checks "
+                            "(focus indicators / toggle contract) — type DONE to accept as-is."
+                        )
+                    print(f"\n👀 VIEW DESIGN SHELL: http://localhost:{port}/design_shell.html")
+                    print(f"Visual Summary: {audit.get('summary')}")
+                    print("Waiting for feedback... (DONE to accept, SAVE to save draft, UNDO to revert)")
+                    msg = self._next_action(timeout=None)
 
-                if msg["type"] == "accept":
-                    print("✅ Accepted — finishing.")
-                    outcome = "accepted"
-                    break
-                if msg["type"] == "undo":
-                    self._undo()
-                    audit = self.status.get_audit() or audit
-                    continue
-                if msg["type"] == "save":
-                    self._save_draft()
-                    continue
+                    if msg["type"] == "accept":
+                        print("✅ Accepted — finishing.")
+                        outcome = "accepted"
+                        break
+                    if msg["type"] == "undo":
+                        self._undo()
+                        audit = self.status.get_audit() or audit
+                        continue
+                    if msg["type"] == "save":
+                        self._save_draft()
+                        continue
+                    feedback_text = msg["text"]
+                    refine_img, refine_label = self._route_feedback(feedback_text)
 
                 try:
                     self.status.set_phase("generating-code", f"Refining iteration {self.iteration + 1}")
-                    refine_img, refine_label = self._route_feedback(msg["text"])
-                    self.refine_code(audit, image_path=refine_img, human_feedback=msg["text"], view_label=refine_label)
-                    audit = self._produce_iteration(feedback=msg["text"])
+                    self.refine_code(audit, image_path=refine_img, human_feedback=feedback_text, view_label=refine_label)
+                    audit = self._produce_iteration(feedback=feedback_text)
                 except Exception as e:
                     result = self._recover_iteration(e, audit, port)
                     if result == "accepted":
@@ -1362,6 +1392,7 @@ class FrontendDesignLoop:
             print(f"📊 Run report: {report_path}")
         except Exception as e:
             print(f"⚠️ Report generation failed ({e}) — continuing.")
+        return outcome
 
     def _restore_run(self, port):
         """Restore an unfinished run from run_state. Returns the snapshot's

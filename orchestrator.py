@@ -1,6 +1,10 @@
 """CLI entry point: wires config, status, server, and loop together.
 
-Usage: python3 orchestrator.py ["design intent"] [--max-iterations N] [--port P] [--resume | --fresh]
+Usage: python3 orchestrator.py ["design intent"] [--max-iterations N] [--port P]
+                               [--reference PATH_OR_URL] [--reconfigure] [--auto]
+                               [--resume | --fresh]
+
+Exits non-zero when a run ends without converging or being accepted.
 """
 
 import argparse
@@ -31,6 +35,11 @@ def parse_args(argv=None):
         action="store_true",
         help="always open the provider wizard, even when the saved config already works",
     )
+    p.add_argument(
+        "--auto",
+        action="store_true",
+        help="refine from the audit alone until it converges or the iteration budget runs out; exits non-zero if it never converges",
+    )
     g = p.add_mutually_exclusive_group()
     g.add_argument("--resume", action="store_true", help="resume an unfinished run without prompting")
     g.add_argument("--fresh", action="store_true", help="discard any unfinished run state")
@@ -39,6 +48,10 @@ def parse_args(argv=None):
     # consume a reference. Reject the combination rather than silently ignore it.
     if args.reference and args.resume:
         p.error("--reference cannot be combined with --resume (seeding only happens on a fresh run)")
+    # Nothing can answer the web shell's intent prompt in auto mode, so a missing
+    # intent would stall for ten minutes and then exit. Fail here instead.
+    if args.auto and not args.intent:
+        p.error("--auto requires an intent argument (there is nobody to answer the web shell prompt)")
     return args
 
 
@@ -46,6 +59,9 @@ def decide_resume(args, run_state: RunState, ask=input) -> bool:
     """Startup decision: resume, or start fresh (clearing happens in run())."""
     if args.fresh:
         run_state.clear()
+        return False
+    if getattr(args, "auto", False) and not args.resume:
+        # No prompt in auto mode: there is nobody to answer it.
         return False
     if getattr(args, "reference", None):
         # --resume is already rejected at parse time; this covers the interactive
@@ -83,12 +99,17 @@ def main():
         status=status,
         reference=args.reference,
         reconfigure=args.reconfigure,
+        auto=args.auto,
     )
     server.start()
     try:
-        loop.run(port=server.port, resume=resume)
+        outcome = loop.run(port=server.port, resume=resume)
     finally:
         server.stop()
+    # A run that never reached a clean audit is a failure a pipeline can gate on.
+    # 'accepted' counts as success: a human looked at it and said so.
+    if outcome not in ("converged", "accepted"):
+        sys.exit(1)
 
 
 if __name__ == "__main__":
