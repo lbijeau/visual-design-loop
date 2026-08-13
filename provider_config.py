@@ -93,13 +93,20 @@ class ProviderConfig:
         self._reload()
 
     def _reload(self):
-        """Load config from disk, falling back to builtins."""
+        """Load config from disk, falling back to builtins.
+
+        ``from_disk`` records which happened: the builtin fallback is a usable
+        default, not evidence that anyone has configured anything, and callers
+        deciding whether to prompt need to tell those apart.
+        """
         try:
             with open(self.config_path, "r") as f:
                 data = json.load(f)
             self._config = data
+            self.from_disk = True
         except (FileNotFoundError, json.JSONDecodeError):
             self._config = {"providers": BUILTIN_PROVIDERS, "roles": DEFAULT_ROLES}
+            self.from_disk = False
 
     @property
     def raw(self) -> dict:

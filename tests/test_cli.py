@@ -50,6 +50,13 @@ def test_reference_parsing_and_resume_conflict():
     print("✅")
 
 
+def test_reconfigure_flag():
+    print("  test_reconfigure_flag...", end=" ")
+    assert parse_args([]).reconfigure is False
+    assert parse_args(["--reconfigure"]).reconfigure is True
+    print("✅")
+
+
 def test_reference_skips_resume_prompt():
     print("  test_reference_skips_resume_prompt...", end=" ")
     rs = RunState(Path(tempfile.mkdtemp()) / "run_state")
@@ -94,5 +101,6 @@ if __name__ == "__main__":
     test_resume_fresh_mutually_exclusive()
     test_decide_resume()
     test_reference_parsing_and_resume_conflict()
+    test_reconfigure_flag()
     test_reference_skips_resume_prompt()
     print("\nAll tests passed ✅")

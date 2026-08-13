@@ -94,8 +94,11 @@ Flags:
 | `--port P` | Base port; hunts `P..P+100` (default 8000) |
 | `--resume` / `--fresh` | Continue or discard an interrupted run (default: prompt) |
 | `--reference PATH_OR_URL` | Seed the theme and first draft from a screenshot or a live URL (fresh runs only) |
+| `--reconfigure` | Always open the provider wizard, even when the saved config already works |
 
-An optional `start.sh` launches the orchestrator detached and pushes `providers.json` for you; edit its hard-coded intent before using it.
+When `providers.json` already resolves the brain and eyes roles to reachable models, the run uses it and starts immediately — so a CLI run needs no browser. The wizard is offered only when there is nothing saved, or when what is saved no longer works; `--reconfigure` opens it on demand.
+
+An optional `start.sh` launches the orchestrator detached; edit its hard-coded intent before using it. Its `providers.json` push is no longer needed to get a run started.
 
 ### Seeding from a reference
 
